@@ -16,6 +16,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { Sidebar, type AppView } from './components/Sidebar'
+import { MindMapView } from './components/MindMapView'
 import { MemoryTimelinePage } from './pages/MemoryTimelinePage'
 import { RecordingsPage } from './pages/RecordingsPage'
 import { useMinutero } from './useMinutero'
@@ -69,7 +70,7 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {view === 'recordings' ? (
-          <RecordingsPage />
+          <RecordingsPage minutero={m} />
         ) : view === 'timeline' ? (
           <MemoryTimelinePage />
         ) : (
@@ -145,10 +146,10 @@ export default function App() {
                 </p>
               </article>
               <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
-                <span className="text-xs text-zinc-500">Modelo minutero</span>
+                <span className="text-xs text-zinc-500">Modelo local</span>
                 <p className="mt-1 flex items-center gap-2 text-sm font-semibold">
                   <StatusDot ok={m.modelOk} />
-                  {m.modelOk ? 'Listo' : 'No disponible'}
+                  {m.modelOk ? m.modelName || 'Listo' : 'No disponible'}
                 </p>
               </article>
               <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -208,7 +209,7 @@ export default function App() {
                     </div>
                     <h4 className="mt-4 font-semibold text-white">Subir audio</h4>
                     <p className="mt-1 text-xs text-zinc-500">
-                      Suelta un archivo o haz clic · .wav, .mp3, .m4a, .ogg
+                      Suelta un archivo o haz clic · .wav, .mp3, .m4a, .ogg, .mp4
                     </p>
                     {m.fileMeta && <p className="mt-2 text-xs font-medium text-[#c7b8ea]">{m.fileMeta}</p>}
                     <Waveform color="purple" />
@@ -217,7 +218,7 @@ export default function App() {
                   <input
                     ref={m.audioInputRef}
                     type="file"
-                    accept=".wav,.mp3,.m4a,.ogg,audio/*"
+                    accept=".wav,.mp3,.m4a,.ogg,.webm,.mp4,audio/*,video/mp4"
                     hidden
                     onChange={(e) => m.handleFiles(e.target.files)}
                   />
@@ -308,10 +309,11 @@ export default function App() {
                     </button>
                   </div>
                   <div
-                    ref={m.mapOutputRef}
                     className="mindmap output-box min-h-[140px] rounded-lg border border-zinc-800/80 bg-zinc-950/50 p-3 text-zinc-300"
                     aria-live="polite"
-                  />
+                  >
+                    <MindMapView markdown={m.mapMarkdown} loading={m.mapGenerating} />
+                  </div>
                 </article>
               </div>
             </section>
@@ -321,21 +323,40 @@ export default function App() {
               ref={questionsRef}
               className={`mb-8 ${!m.workEnabled ? 'pointer-events-none opacity-40' : ''}`}
             >
-              <h3 className="mb-4 text-lg font-semibold text-white">Preguntas libres</h3>
-
-              {m.history.length > 0 && (
-                <div className="mb-4 grid gap-3">
-                  {m.history.map((item) => (
-                    <article
-                      key={item.question}
-                      className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
-                    >
-                      <p className="text-sm font-semibold text-white">{item.question}</p>
-                      <p className="mt-2 text-sm text-zinc-400">{item.answer}</p>
-                    </article>
-                  ))}
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Chat de la reunión</h3>
+                  <p className="mt-1 text-xs text-zinc-500">Conserva el hilo y consulta el audio indexado.</p>
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={m.resetConversation}
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+                >
+                  Limpiar chat
+                </button>
+              </div>
+
+              <div className="mb-4 flex max-h-[360px] min-h-[220px] flex-col gap-3 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                {m.conversation.length === 0 ? (
+                  <div className="m-auto max-w-md text-center text-sm text-zinc-600">
+                    Pregunta algo sobre la grabación o continúa la conversación como lo harías con ChatGPT.
+                  </div>
+                ) : (
+                  m.conversation.map((message, index) => (
+                    <article
+                      key={`${message.role}-${index}`}
+                      className={`max-w-[84%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                        message.role === 'user'
+                          ? 'self-end bg-[#c7b8ea] text-zinc-950'
+                          : 'self-start border border-zinc-800 bg-zinc-950/60 text-zinc-200'
+                      }`}
+                    >
+                      {message.content}
+                    </article>
+                  ))
+                )}
+              </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
@@ -345,23 +366,17 @@ export default function App() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') m.askQuestion()
                   }}
-                  placeholder="¿Qué pregunta tienes sobre la reunión?"
+                  placeholder="Pregunta algo o sigue la conversación..."
                   className="flex-1 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-[#c7b8ea]/50"
                 />
                 <button
                   type="button"
                   onClick={m.askQuestion}
+                  disabled={m.isChatting}
                   className="rounded-xl bg-[#c7b8ea] px-6 py-3 text-sm font-semibold text-zinc-900 hover:bg-[#d4c8f0]"
                 >
-                  Preguntar
+                  {m.isChatting ? 'Generando...' : 'Enviar'}
                 </button>
-              </div>
-
-              <div
-                className="output-box mt-4 min-h-[120px] rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-zinc-300"
-                aria-live="polite"
-              >
-                {m.answerOutput}
               </div>
             </section>
           </main>
