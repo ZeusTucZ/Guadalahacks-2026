@@ -1,6 +1,6 @@
 # Minutero
 
-Minutero es un asistente local para convertir audio de reuniones, clases o charlas en conocimiento consultable: transcripcion, resumen ejecutivo, mapa mental y preguntas libres con RAG.
+Minutero es un asistente local para convertir audio de reuniones, clases o charlas en conocimiento consultable: transcripcion, resumen ejecutivo, mapa mental y chat conversacional con RAG.
 
 El objetivo del proyecto es demostrar IA en el borde: el audio, los embeddings, la base vectorial y el LLM corren en la misma maquina del usuario, sin APIs externas de IA.
 
@@ -10,7 +10,7 @@ En reuniones, clases y conferencias se pierde informacion importante porque todo
 
 ## Solucion
 
-Minutero transforma una grabacion en una memoria local:
+Minutero transforma una grabacion en una memoria local. La entrada puede ser un archivo de audio o una grabacion capturada desde el microfono del navegador:
 
 ```text
 Audio
@@ -20,10 +20,10 @@ Audio
 -> Embeddings locales con Ollama
 -> ChromaDB local
 -> RAG con LLM local
--> Resumen / mapa mental / preguntas
+-> Resumen / mapa mental / chat
 ```
 
-La optimizacion de tokens ocurre con embeddings: el modelo no recibe toda la transcripcion en cada pregunta, solo los fragmentos semanticamente relevantes.
+La optimizacion de tokens ocurre con embeddings: el modelo no recibe toda la transcripcion en cada pregunta, solo los fragmentos semanticamente relevantes. El chat conserva historial reciente en el navegador y lo combina con retrieval local para mantener el hilo de la conversacion sin reenviar toda la reunion.
 
 ## Requisitos del sistema
 
@@ -92,6 +92,18 @@ source .venv/bin/activate
 uvicorn main:app --reload --port 8000
 ```
 
+Para demo rapida en equipos con menos memoria, puedes usar un modelo local mas ligero que ya tengas en Ollama:
+
+```bash
+MINUTERO_LLM_MODEL=llama3.2:3b MINUTERO_NUM_CTX=2048 MINUTERO_NUM_PREDICT=350 uvicorn main:app --reload --port 8000
+```
+
+El modelo por defecto sigue siendo `minutero`. La variable `MINUTERO_KEEP_ALIVE` mantiene el modelo cargado en Ollama despues de la primera generacion:
+
+```bash
+MINUTERO_KEEP_ALIVE=30m uvicorn main:app --reload --port 8000
+```
+
 Abre:
 
 ```text
@@ -114,7 +126,7 @@ Esto crea `outputs/transcripcion.txt` e indexa los chunks en `chroma_db/`.
 
 1. Inicia Ollama.
 2. Corre el servidor local.
-3. Sube el audio de la platica o una grabacion corta.
+3. Sube el audio de la platica o graba una muestra desde el microfono.
 4. Genera el resumen.
 5. Genera el mapa mental.
 6. Pregunta: `¿Cuales son las reglas del track?`
