@@ -16,6 +16,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { Sidebar, type AppView } from './components/Sidebar'
+import { MemoryTimelinePage } from './pages/MemoryTimelinePage'
 import { RecordingsPage } from './pages/RecordingsPage'
 import { useMinutero } from './useMinutero'
 
@@ -69,6 +70,8 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         {view === 'recordings' ? (
           <RecordingsPage />
+        ) : view === 'timeline' ? (
+          <MemoryTimelinePage />
         ) : (
           <>
         <header className="flex items-center gap-4 border-b border-zinc-800/60 px-4 py-4 md:px-8">

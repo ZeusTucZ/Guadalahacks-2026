@@ -7,7 +7,7 @@ import {
   Shield,
 } from 'lucide-react'
 
-export type AppView = 'dashboard' | 'recordings'
+export type AppView = 'dashboard' | 'recordings' | 'timeline'
 
 type NavItem = {
   id: AppView | 'timeline' | 'search' | 'settings'
@@ -43,14 +43,14 @@ export function Sidebar({ activeView, localActive, onNavigate, onNewRecording }:
 
       <nav className="flex flex-1 flex-col gap-1">
         {NAV.map((item) => {
-          const isPage = item.id === 'dashboard' || item.id === 'recordings'
+          const isPage = item.id === 'dashboard' || item.id === 'recordings' || item.id === 'timeline'
           const isActive = item.id === activeView
           return (
             <button
               key={item.label}
               type="button"
               onClick={() => {
-                if (isPage) onNavigate(item.id)
+                if (isPage) onNavigate(item.id as AppView)
               }}
               className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
                 isActive
@@ -78,7 +78,7 @@ export function Sidebar({ activeView, localActive, onNavigate, onNewRecording }:
       <button
         type="button"
         className={`flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-xs text-zinc-400 transition hover:text-zinc-200 ${
-          activeView === 'recordings' ? 'mt-auto' : 'mt-6'
+          activeView === 'recordings' || activeView === 'timeline' ? 'mt-auto' : 'mt-6'
         }`}
       >
         <Shield className="h-4 w-4" />
