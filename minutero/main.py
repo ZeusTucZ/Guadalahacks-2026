@@ -5,28 +5,39 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 try:
     from .chunk import chunkear
     from .index import contar_chunks, indexar, limpiar_coleccion, obtener_chunks
     from .prompts import prompt_mapa_mental, prompt_resumen
-    from .query import LLM_MODEL, generar_respuesta, stream_con_prompt
+    from .query import LLM_MODEL, calentar_modelo, generar_chat, generar_respuesta, stream_con_prompt
     from .transcribe import transcribir
 except ImportError:
     from chunk import chunkear
     from index import contar_chunks, indexar, limpiar_coleccion, obtener_chunks
     from prompts import prompt_mapa_mental, prompt_resumen
-    from query import LLM_MODEL, generar_respuesta, stream_con_prompt
+    from query import LLM_MODEL, calentar_modelo, generar_chat, generar_respuesta, stream_con_prompt
     from transcribe import transcribir
 
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 TEMP_DIR = BASE_DIR / "temp_audio"
+
+
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    mensaje: str = Field(..., min_length=1)
+    historial: list[ChatTurn] = Field(default_factory=list)
 
 app = FastAPI(title="Minutero", version="0.1.0")
 
@@ -85,7 +96,7 @@ def _contexto_general(limit: int = 5) -> str:
 
 
 @app.post("/indexar")
-def indexar_audio(audio: UploadFile = File(...)) -> JSONResponse:
+def indexar_audio(background_tasks: BackgroundTasks, audio: UploadFile = File(...)) -> JSONResponse:
     TEMP_DIR.mkdir(exist_ok=True)
     nombre_seguro = Path(audio.filename or "audio").name
     ruta_audio = TEMP_DIR / nombre_seguro
@@ -98,6 +109,7 @@ def indexar_audio(audio: UploadFile = File(...)) -> JSONResponse:
         chunks = chunkear(texto)
         limpiar_coleccion()
         total = indexar(chunks)
+        background_tasks.add_task(calentar_modelo)
 
         return JSONResponse(
             {
@@ -157,6 +169,22 @@ def preguntar(q: str = Query(..., min_length=1)) -> StreamingResponse:
     )
 
 
+@app.post("/chat")
+def chat(payload: ChatRequest) -> StreamingResponse:
+    historial = [{"role": turno.role, "content": turno.content} for turno in payload.historial]
+    return StreamingResponse(
+        _stream_eventos(generar_chat(payload.mensaje, historial)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/calentar")
+def calentar() -> JSONResponse:
+    calentar_modelo()
+    return JSONResponse({"ok": True, "modelo": LLM_MODEL})
+
+
 def _nombres_modelos_ollama(respuesta: Any) -> list[str]:
     modelos = getattr(respuesta, "models", None)
     if modelos is None and isinstance(respuesta, dict):
@@ -196,6 +224,7 @@ def estado() -> JSONResponse:
         {
             "ollama": ollama_ok,
             "modelo": modelo_ok,
+            "modelo_nombre": LLM_MODEL,
             "chunks_indexados": chunks,
         }
     )
