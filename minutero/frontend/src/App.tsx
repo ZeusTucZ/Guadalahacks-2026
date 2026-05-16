@@ -1,23 +1,22 @@
-import { useRef, type RefObject } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 import {
   Activity,
   AudioLines,
   Calendar,
   CheckSquare,
   EyeOff,
-  LayoutDashboard,
   Lightbulb,
   Lock,
-  Mic,
   Plane,
   Play,
   Plus,
   Search,
-  Settings,
   Shield,
   Sparkles,
   Upload,
 } from 'lucide-react'
+import { Sidebar, type AppView } from './components/Sidebar'
+import { RecordingsPage } from './pages/RecordingsPage'
 import { useMinutero } from './useMinutero'
 
 const WAVEFORM = [3, 7, 5, 9, 4, 8, 6, 10, 5, 7, 4, 9, 6, 8, 5, 11, 4, 7, 6, 9]
@@ -49,6 +48,7 @@ function scrollToRef(ref: RefObject<HTMLElement | null>) {
 }
 
 export default function App() {
+  const [view, setView] = useState<AppView>('dashboard')
   const m = useMinutero()
   const uploadRef = useRef<HTMLElement>(null)
   const outputsRef = useRef<HTMLElement>(null)
@@ -59,61 +59,18 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-[#09090b] text-zinc-100">
-      {/* Sidebar */}
-      <aside className="hidden w-[260px] shrink-0 flex-col border-r border-zinc-800/80 bg-[#0c0c0e] px-5 py-6 lg:flex">
-        <div className="mb-8">
-          <h1 className="text-xl font-bold tracking-tight text-white">Minutero</h1>
-          <p className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-            <span className={`h-2 w-2 rounded-full ${localActive ? 'bg-teal-400' : 'bg-amber-500'}`} />
-            {localActive ? 'IA local activa' : 'IA local pendiente'}
-          </p>
-        </div>
+      <Sidebar
+        activeView={view}
+        localActive={localActive}
+        onNavigate={setView}
+        onNewRecording={m.openFilePicker}
+      />
 
-        <nav className="flex flex-1 flex-col gap-1">
-          {[
-            { icon: LayoutDashboard, label: 'Dashboard', ref: uploadRef },
-            { icon: Mic, label: 'Grabaciones', ref: uploadRef },
-            { icon: Activity, label: 'Línea de tiempo', ref: outputsRef },
-            { icon: Search, label: 'Buscar', ref: questionsRef },
-            { icon: Settings, label: 'Ajustes', ref: statusRef },
-          ].map((item, i) => (
-            <button
-              key={item.label}
-              type="button"
-              onClick={() => scrollToRef(item.ref)}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-                i === 0
-                  ? 'border-l-2 border-[#c7b8ea] bg-[#c7b8ea]/10 text-white'
-                  : 'border-l-2 border-transparent text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300'
-              }`}
-            >
-              <item.icon className={`h-4 w-4 ${i === 0 ? 'text-[#c7b8ea]' : ''}`} />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
-        <button
-          type="button"
-          onClick={m.openFilePicker}
-          className="mt-6 w-full rounded-xl bg-[#c7b8ea] px-4 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-[#d4c8f0]"
-        >
-          Nueva grabación
-        </button>
-
-        <button
-          type="button"
-          onClick={() => scrollToRef(statusRef)}
-          className="mt-6 flex items-center gap-2 text-xs text-zinc-500 transition hover:text-zinc-300"
-        >
-          <Shield className="h-4 w-4" />
-          Estado de privacidad
-        </button>
-      </aside>
-
-      {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
+        {view === 'recordings' ? (
+          <RecordingsPage />
+        ) : (
+          <>
         <header className="flex items-center gap-4 border-b border-zinc-800/60 px-4 py-4 md:px-8">
           <div className="mx-auto flex w-full max-w-xl items-center gap-3 rounded-full border border-zinc-800 bg-zinc-900/60 px-4 py-2.5 backdrop-blur">
             <Search className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -418,11 +375,10 @@ export default function App() {
           </aside>
         </div>
 
-        {/* Bottom nav */}
         <nav className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/90 px-2 py-2 shadow-2xl backdrop-blur-md">
           <button
             type="button"
-            onClick={m.openFilePicker}
+            onClick={() => setView('recordings')}
             className="flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white"
           >
             <Plus className="h-4 w-4" />
@@ -445,6 +401,8 @@ export default function App() {
             Estado local
           </button>
         </nav>
+          </>
+        )}
       </div>
     </div>
   )
