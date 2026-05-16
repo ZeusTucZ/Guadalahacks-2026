@@ -14,14 +14,12 @@ from pydantic import BaseModel, Field
 try:
     from .chunk import chunkear
     from .index import contar_chunks, indexar, limpiar_coleccion, obtener_chunks
-    from .prompts import prompt_mapa_mental, prompt_resumen
-    from .query import LLM_MODEL, calentar_modelo, generar_chat, generar_respuesta, stream_con_prompt
+    from .query import LLM_MODEL, calentar_modelo, generar_chat, generar_mapa_seguro, generar_respuesta, generar_resumen_seguro
     from .transcribe import transcribir
 except ImportError:
     from chunk import chunkear
     from index import contar_chunks, indexar, limpiar_coleccion, obtener_chunks
-    from prompts import prompt_mapa_mental, prompt_resumen
-    from query import LLM_MODEL, calentar_modelo, generar_chat, generar_respuesta, stream_con_prompt
+    from query import LLM_MODEL, calentar_modelo, generar_chat, generar_mapa_seguro, generar_respuesta, generar_resumen_seguro
     from transcribe import transcribir
 
 
@@ -48,6 +46,8 @@ app.add_middleware(
         "http://127.0.0.1:8000",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -134,7 +134,7 @@ def resumir() -> StreamingResponse:
     if not contexto:
         tokens = _stream_texto("No hay audio indexado.")
     else:
-        tokens = stream_con_prompt(prompt_resumen(contexto))
+        tokens = generar_resumen_seguro(contexto)
 
     return StreamingResponse(
         _stream_eventos(tokens),
@@ -149,7 +149,7 @@ def mapa() -> StreamingResponse:
     if not contexto:
         tokens = _stream_texto("# Sin audio indexado\n- Sube y procesa una grabacion primero.")
     else:
-        tokens = stream_con_prompt(prompt_mapa_mental(contexto))
+        tokens = generar_mapa_seguro(contexto)
 
     return StreamingResponse(
         _stream_eventos(tokens),
