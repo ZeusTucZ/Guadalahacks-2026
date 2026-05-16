@@ -1,0 +1,6 @@
+openai-whisper
+ollama
+chromadb
+fastapi
+uvicorn[standard]
+python-multipart

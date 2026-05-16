@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+
+minutero/chroma_db/
+minutero/temp_audio/
+minutero/outputs/

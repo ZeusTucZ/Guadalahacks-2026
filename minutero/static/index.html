@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minutero</title>
+  <style>
+    :root {
+      --bg: #f6f8f7;
+      --panel: #ffffff;
+      --ink: #17211d;
+      --muted: #60716a;
+      --line: #dbe4df;
+      --primary: #0f6e56;
+      --primary-dark: #0a4f3e;
+      --danger: #b42318;
+      --ok: #107c41;
+      --warn: #a15c07;
+      --shadow: 0 10px 30px rgba(20, 39, 32, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      font-weight: 700;
+      padding: 11px 16px;
+    }
+
+    button:hover {
+      background: var(--primary-dark);
+    }
+
+    button:disabled {
+      background: #9cb5ad;
+      cursor: not-allowed;
+    }
+
+    .app {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 34px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 6px;
+      max-width: 760px;
+    }
+
+    .local-badge {
+      white-space: nowrap;
+      background: #e4f4ed;
+      color: var(--primary-dark);
+      border: 1px solid #b8ded0;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 800;
+      padding: 8px 12px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .status-card,
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .status-card {
+      padding: 14px 16px;
+      min-height: 78px;
+    }
+
+    .status-label {
+      color: var(--muted);
+      display: block;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .status-value {
+      align-items: center;
+      display: flex;
+      font-size: 18px;
+      font-weight: 800;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warn);
+      display: inline-block;
+    }
+
+    .dot.ok {
+      background: var(--ok);
+    }
+
+    .dot.bad {
+      background: var(--danger);
+    }
+
+    .panel {
+      margin-top: 16px;
+      padding: 20px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .panel h2 {
+      font-size: 21px;
+    }
+
+    .dropzone {
+      align-items: center;
+      border: 2px dashed #a9c5bb;
+      border-radius: 8px;
+      background: #fbfdfc;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 180px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .dropzone.dragover {
+      border-color: var(--primary);
+      background: #edf8f4;
+    }
+
+    .drop-title {
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .drop-help {
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .file-meta {
+      color: var(--primary-dark);
+      font-weight: 800;
+      margin-top: 12px;
+    }
+
+    .upload-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 3px solid #cfe4dc;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      display: none;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .working .spinner {
+      display: inline-block;
+    }
+
+    .message {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .preview {
+      background: #f0f5f2;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: #25362f;
+      margin-top: 14px;
+      min-height: 56px;
+      padding: 12px;
+    }
+
+    .outputs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .output-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 320px;
+      padding: 14px;
+      background: #fcfefd;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+    }
+
+    .mindmap {
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      white-space: normal;
+    }
+
+    .mindmap ul {
+      border-left: 2px solid #cfe0d9;
+      list-style: none;
+      margin: 8px 0 8px 14px;
+      padding-left: 16px;
+    }
+
+    .mindmap li {
+      margin: 7px 0;
+    }
+
+    .mindmap .node {
+      background: #eef7f3;
+      border: 1px solid #cfe4dc;
+      border-radius: 8px;
+      display: inline-block;
+      padding: 7px 10px;
+    }
+
+    .mindmap .root {
+      background: var(--primary);
+      color: white;
+      font-weight: 800;
+    }
+
+    .ask-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .ask-row input {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      padding: 12px;
+      width: 100%;
+    }
+
+    .history {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .history-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdfc;
+      padding: 12px;
+    }
+
+    .history-q {
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    .disabled {
+      opacity: 0.58;
+      pointer-events: none;
+    }
+
+    @media (max-width: 900px) {
+      .app {
+        padding: 18px;
+      }
+
+      .topbar,
+      .panel-header,
+      .upload-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .status-grid,
+      .outputs,
+      .ask-row {
+        grid-template-columns: 1fr;
+      }
+
+      .local-badge {
+        align-self: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>Minutero</h1>
+        <p class="subtitle">Asistente local para convertir audio de reuniones, clases y charlas en resumenes, mapas mentales y respuestas consultables.</p>
+      </div>
+      <div class="local-badge">100% local · sin nube</div>
+    </header>
+
+    <section class="status-grid" aria-label="Estado del sistema">
+      <article class="status-card">
+        <span class="status-label">Ollama</span>
+        <strong class="status-value"><span id="ollamaDot" class="dot"></span><span id="ollamaText">Revisando</span></strong>
+      </article>
+      <article class="status-card">
+        <span class="status-label">Modelo minutero</span>
+        <strong class="status-value"><span id="modelDot" class="dot"></span><span id="modelText">Revisando</span></strong>
+      </article>
+      <article class="status-card">
+        <span class="status-label">Chunks indexados</span>
+        <strong id="chunkCount" class="status-value">0</strong>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Subir audio</h2>
+      </div>
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Seleccionar archivo de audio">
+        <div class="drop-title">Suelta un archivo de audio o haz click para seleccionarlo</div>
+        <div class="drop-help">Formatos: .wav, .mp3, .m4a, .ogg</div>
+        <div id="fileMeta" class="file-meta"></div>
+      </div>
+      <input id="audioInput" type="file" accept=".wav,.mp3,.m4a,.ogg,audio/*" hidden>
+      <div id="uploadActions" class="upload-actions">
+        <button id="indexBtn" disabled>Transcribir e indexar</button>
+        <span class="spinner" aria-hidden="true"></span>
+        <span id="uploadMessage" class="message">Selecciona un archivo para empezar.</span>
+      </div>
+      <div id="preview" class="preview" aria-live="polite">La vista previa de la transcripcion aparecera aqui.</div>
+    </section>
+
+    <section id="autoSection" class="panel disabled">
+      <div class="panel-header">
+        <h2>Outputs automaticos</h2>
+      </div>
+      <div class="outputs">
+        <article>
+          <div class="panel-header">
+            <h3>Resumen ejecutivo</h3>
+            <button id="summaryBtn">Generar resumen</button>
+          </div>
+          <div id="summaryOutput" class="output-box" aria-live="polite"></div>
+        </article>
+        <article>
+          <div class="panel-header">
+            <h3>Mapa mental</h3>
+            <button id="mapBtn">Generar mapa mental</button>
+          </div>
+          <div id="mapOutput" class="output-box mindmap" aria-live="polite"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="questionSection" class="panel disabled">
+      <div class="panel-header">
+        <h2>Preguntas libres</h2>
+      </div>
+      <div id="history" class="history"></div>
+      <div class="ask-row">
+        <input id="questionInput" type="text" placeholder="¿Que pregunta tienes sobre la reunion?">
+        <button id="askBtn">Preguntar</button>
+      </div>
+      <div id="answerOutput" class="output-box" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      file: null,
+      history: [],
+      lastMapMarkdown: ''
+    };
+
+    const els = {
+      ollamaDot: document.getElementById('ollamaDot'),
+      ollamaText: document.getElementById('ollamaText'),
+      modelDot: document.getElementById('modelDot'),
+      modelText: document.getElementById('modelText'),
+      chunkCount: document.getElementById('chunkCount'),
+      dropzone: document.getElementById('dropzone'),
+      audioInput: document.getElementById('audioInput'),
+      fileMeta: document.getElementById('fileMeta'),
+      indexBtn: document.getElementById('indexBtn'),
+      uploadActions: document.getElementById('uploadActions'),
+      uploadMessage: document.getElementById('uploadMessage'),
+      preview: document.getElementById('preview'),
+      autoSection: document.getElementById('autoSection'),
+      questionSection: document.getElementById('questionSection'),
+      summaryBtn: document.getElementById('summaryBtn'),
+      mapBtn: document.getElementById('mapBtn'),
+      summaryOutput: document.getElementById('summaryOutput'),
+      mapOutput: document.getElementById('mapOutput'),
+      questionInput: document.getElementById('questionInput'),
+      askBtn: document.getElementById('askBtn'),
+      answerOutput: document.getElementById('answerOutput'),
+      history: document.getElementById('history')
+    };
+
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    function setDot(dot, ok) {
+      dot.classList.remove('ok', 'bad');
+      dot.classList.add(ok ? 'ok' : 'bad');
+    }
+
+    function enableWork(enabled) {
+      els.autoSection.classList.toggle('disabled', !enabled);
+      els.questionSection.classList.toggle('disabled', !enabled);
+    }
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/estado');
+        const data = await res.json();
+        setDot(els.ollamaDot, data.ollama);
+        setDot(els.modelDot, data.modelo);
+        els.ollamaText.textContent = data.ollama ? 'Conectado' : 'No conectado';
+        els.modelText.textContent = data.modelo ? 'Listo' : 'No disponible';
+        els.chunkCount.textContent = data.chunks_indexados;
+        enableWork(Number(data.chunks_indexados) > 0);
+      } catch (error) {
+        setDot(els.ollamaDot, false);
+        setDot(els.modelDot, false);
+        els.ollamaText.textContent = 'Error';
+        els.modelText.textContent = 'Error';
+      }
+    }
+
+    function selectFile(file) {
+      state.file = file;
+      els.fileMeta.textContent = `${file.name} · ${formatBytes(file.size)}`;
+      els.indexBtn.disabled = false;
+      els.uploadMessage.textContent = 'Archivo listo para procesar.';
+    }
+
+    function handleFiles(files) {
+      const file = files && files[0];
+      if (!file) return;
+      selectFile(file);
+    }
+
+    els.dropzone.addEventListener('click', () => els.audioInput.click());
+    els.dropzone.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        els.audioInput.click();
+      }
+    });
+    els.audioInput.addEventListener('change', () => handleFiles(els.audioInput.files));
+    els.dropzone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      els.dropzone.classList.add('dragover');
+    });
+    els.dropzone.addEventListener('dragleave', () => els.dropzone.classList.remove('dragover'));
+    els.dropzone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      els.dropzone.classList.remove('dragover');
+      handleFiles(event.dataTransfer.files);
+    });
+
+    async function indexAudio() {
+      if (!state.file) return;
+
+      const form = new FormData();
+      form.append('audio', state.file);
+      els.uploadActions.classList.add('working');
+      els.indexBtn.disabled = true;
+      els.uploadMessage.textContent = 'Transcribiendo... esto tarda ~30 seg por cada 10 min de audio';
+
+      try {
+        const res = await fetch('/indexar', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'No se pudo indexar el audio.');
+        els.preview.textContent = data.preview || 'Audio procesado.';
+        els.uploadMessage.textContent = `Listo. ${data.chunks} chunks indexados.`;
+        enableWork(true);
+        await refreshStatus();
+      } catch (error) {
+        els.uploadMessage.textContent = error.message;
+        els.indexBtn.disabled = false;
+      } finally {
+        els.uploadActions.classList.remove('working');
+      }
+    }
+
+    function streamTo(url, output, done) {
+      output.textContent = '';
+      const es = new EventSource(url);
+      es.onmessage = (event) => {
+        if (event.data === '[DONE]') {
+          es.close();
+          if (done) done(output.textContent);
+          return;
+        }
+        if (event.data.startsWith('[ERROR]')) {
+          output.textContent += event.data;
+          es.close();
+          return;
+        }
+        output.textContent += event.data;
+      };
+      es.onerror = () => {
+        es.close();
+      };
+    }
+
+    function renderMindMap(markdown) {
+      state.lastMapMarkdown = markdown;
+      const lines = markdown.split('\n').map((line) => line.trim()).filter(Boolean);
+      const root = document.createElement('div');
+      const stack = [{ level: 0, element: root }];
+
+      lines.forEach((line) => {
+        let level = 1;
+        let text = line;
+        let rootNode = false;
+
+        if (line.startsWith('# ')) {
+          level = 1;
+          text = line.replace(/^#\s+/, '');
+          rootNode = true;
+        } else if (line.startsWith('## ')) {
+          level = 2;
+          text = line.replace(/^##\s+/, '');
+        } else if (line.startsWith('- ')) {
+          level = 3;
+          text = line.replace(/^-\s+/, '');
+        } else {
+          return;
+        }
+
+        while (stack.length && stack[stack.length - 1].level >= level) {
+          stack.pop();
+        }
+
+        const parent = stack[stack.length - 1].element;
+        let list = parent.querySelector(':scope > ul');
+        if (!list) {
+          list = document.createElement('ul');
+          parent.appendChild(list);
+        }
+
+        const item = document.createElement('li');
+        const node = document.createElement('span');
+        node.className = `node${rootNode ? ' root' : ''}`;
+        node.textContent = text;
+        item.appendChild(node);
+        list.appendChild(item);
+        stack.push({ level, element: item });
+      });
+
+      els.mapOutput.textContent = '';
+      els.mapOutput.appendChild(root);
+    }
+
+    function addHistory(question, answer) {
+      state.history.unshift({ question, answer });
+      state.history = state.history.slice(0, 3);
+      els.history.innerHTML = '';
+
+      state.history.forEach((item) => {
+        const box = document.createElement('article');
+        box.className = 'history-item';
+        const q = document.createElement('div');
+        q.className = 'history-q';
+        q.textContent = item.question;
+        const a = document.createElement('div');
+        a.textContent = item.answer;
+        box.appendChild(q);
+        box.appendChild(a);
+        els.history.appendChild(box);
+      });
+    }
+
+    function askQuestion() {
+      const question = els.questionInput.value.trim();
+      if (!question) return;
+      els.questionInput.value = '';
+      streamTo(`/preguntar?q=${encodeURIComponent(question)}`, els.answerOutput, (answer) => {
+        addHistory(question, answer);
+      });
+    }
+
+    els.indexBtn.addEventListener('click', indexAudio);
+    els.summaryBtn.addEventListener('click', () => streamTo('/resumir', els.summaryOutput));
+    els.mapBtn.addEventListener('click', () => streamTo('/mapa', els.mapOutput, renderMindMap));
+    els.askBtn.addEventListener('click', askQuestion);
+    els.questionInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') askQuestion();
+    });
+
+    refreshStatus();
+  </script>
+</body>
+</html>
