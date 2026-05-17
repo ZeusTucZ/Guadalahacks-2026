@@ -442,7 +442,7 @@ const VOICE_CHAT_NOISE_MARGIN = 0.012
 const VOICE_CHAT_NOISE_CALIBRATION_MS = 350
 const RECORDING_CHUNK_MS = 1000
 const LIVE_CAPTION_INTERVAL_MS = 5000
-const LIVE_CAPTION_CONTEXT_CHARS = 420
+const LIVE_CAPTION_CONTEXT_CHARS = 180
 
 function isVoiceChatSupported() {
   return (
@@ -797,16 +797,30 @@ function mergeCaptionText(current: string, incoming: string) {
   const normalizedNext = normalizeCaptionForCompare(next)
   if (normalizedCurrent.endsWith(normalizedNext)) return current
 
-  const maxOverlap = Math.min(120, current.length, next.length)
+  const currentSentences = new Set(
+    current
+      .split(/(?<=[.!?])\s+/)
+      .map(normalizeCaptionForCompare)
+      .filter((sentence) => sentence.length >= 10),
+  )
+  const filteredNext = next
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .filter((sentence) => !currentSentences.has(normalizeCaptionForCompare(sentence)))
+    .join(' ')
+  if (!filteredNext) return current
+
+  const maxOverlap = Math.min(120, current.length, filteredNext.length)
   for (let size = maxOverlap; size >= 16; size -= 1) {
     const currentTail = normalizeCaptionForCompare(current.slice(-size))
-    const nextHead = normalizeCaptionForCompare(next.slice(0, size))
+    const nextHead = normalizeCaptionForCompare(filteredNext.slice(0, size))
     if (currentTail && currentTail === nextHead) {
-      return `${current}${next.slice(size)}`
+      return `${current}${filteredNext.slice(size)}`
     }
   }
 
-  return `${current.trimEnd()} ${next}`
+  return `${current.trimEnd()} ${filteredNext}`
 }
 
 export function useMinutero() {

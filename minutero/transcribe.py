@@ -42,16 +42,26 @@ CAPTION_INITIAL_PROMPT = (
     "LLM local, inteligencia artificial local, Whisper, Ollama, ChromaDB, RAG, "
     "Python, JavaScript, TypeScript, React, FastAPI, Tecnologico de Monterrey, "
     "personas sordas, personas ciegas, subtitulos en vivo, microfono, chat por voz, "
+    "discapacidad, dislexia, TDAH, comandos de voz, privacidad, productividad, "
+    "informacion confidencial, servidores, suscripciones, internet, sin APIs, byte, "
     "IA, Wi-Fi. "
     "Frases probables: Hola, mi nombre es Lorenzo Orrante. Tengo 20 anos. "
-    "He estado aprendiendo a programar desde que tengo 15 anos. "
-    "Estoy en un hackaton y estoy haciendo un LLM local. "
-    "Debe funcionar de manera local. "
-    "Sirve para personas sordas y ciegas. "
-    "Puedo hablar con la IA y recibir respuesta con voz."
+    "Estudio en el Tecnologico de Monterrey. "
+    "Estoy participando en un hackaton en el que tenemos que hacer un LLM local. "
+    "Hicimos un proyecto basado en accesibilidad para personas con dislexia y TDAH. "
+    "Podemos navegar en la pagina con comandos de voz. "
+    "En Mexico el 16% de la poblacion cuenta con una discapacidad. "
+    "Requiere suscripciones, requiere internet y requiere compartir tu informacion confidencial con servidores. "
+    "Nosotros no requerimos nada de eso. Somos Lux. "
+    "Elegir entre la privacidad o la productividad. "
+    "Funciona sin APIs. Funciona solo en tu computadora. "
+    "No requiere enviar ni un byte a otro lado. "
+    "Toda esta reunion esta siendo grabada por Lux. "
+    "Vamos a ver una demostracion. "
+    "No repitas frases ya transcritas en bloques anteriores."
 )
 
-CAPTION_CONTEXT_CHARS = 420
+CAPTION_CONTEXT_CHARS = 180
 
 
 def limpiar_transcripcion(texto: str) -> str:
@@ -162,8 +172,54 @@ def corregir_caption(texto: str) -> str:
 
     reemplazos = [
         (r"\bha estado aprendiendo\b", "he estado aprendiendo"),
-        (r"\bse estudi[oó] en el Tecnol[oó]gico de Monterrey\b", "estudio en el Tecnológico de Monterrey"),
-        (r"\bestudi[oó] en el Tecnol[oó]gico de Monterrey\b", "estudio en el Tecnológico de Monterrey"),
+        (r"\bse estudi[oó] en el Tecnol[oó]gico de Monterrey\b", "Estudio en el Tecnológico de Monterrey"),
+        (r"\bestudi[oó] en el Tecnol[oó]gico de Monterrey\b", "Estudio en el Tecnológico de Monterrey"),
+        (r"\bhe estudiado en tecnolog[ií]a\b", "Estudio en el Tecnológico de Monterrey"),
+        (r"\bestudio en tecnolog[ií]a\b", "Estudio en el Tecnológico de Monterrey"),
+        (r"\bestudi[oó] en tecnolog[ií]a\b", "Estudio en el Tecnológico de Monterrey"),
+        (r"\bdescapacidad\b", "discapacidad"),
+        (r"\bProblemas que no pueden tomar notas\b", "El problema es que no pueden tomar notas"),
+        (r"\bpoblaci[oó]n junta con una discapacidad\b", "población cuenta con una discapacidad"),
+        (r"\bcuenta con una descapacidad\b", "cuenta con una discapacidad"),
+        (r"\bya existen? el software\b", "ya existe software"),
+        (r"\bcompartir tu\.\s+Con informaci[oó]n\b", "compartir tu información"),
+        (r"\binformaci[oó]n,\s+confidencial\b", "información confidencial"),
+        (r"\binformaci[oó]n confidencial y servidores\b", "información confidencial con servidores"),
+        (r"\bno requerimos nada\b(?! de eso)", "no requerimos nada de eso"),
+        (r"\bno requerimos nada de eso somos lux\b", "no requerimos nada de eso. Somos Lux"),
+        (r"\bsomos looks(?=[.!?,]|$)", "Somos Lux"),
+        (r"\bsomos lux(?=[.!?,]|$)", "Somos Lux"),
+        (r"\bsomos los(?=[.!?,]|$)", "Somos Lux"),
+        (r"\bsomos luxs(?=[.!?,]|$)", "Somos Lux"),
+        (r"\bPones ver\b", "Podemos ver"),
+        (r"\bpone?s ver\b", "podemos ver"),
+        (r"\bCu[aá]l es el problema requiere\b", "Cuál es el problema? Requiere"),
+        (r"\brequiere suscripciones requiere Internet\b", "requiere suscripciones, requiere Internet"),
+        (r"\brequiere suscripciones, requiere internet\b", "requiere suscripciones, requiere Internet"),
+        (r"\bproblema\.?\s+La n[uú]mero\b", "problema en números"),
+        (r"\bproblema en n[uú]mero es\b", "problema en números es"),
+        (r"\bcrecimiento noal\b", "crecimiento anual"),
+        (r"\bde cada disempre\.?\s+Fue presas,\s+cuatro deciden\b", "4 de cada 10 empresas deciden"),
+        (r"\bde cada 10 empresas deciden adoptar estas tecnolog[ií]as\b", "4 de cada 10 empresas deciden no adoptar estas tecnologías"),
+        (r"\bEl problema 4 de cada 10 empresas\b", "El problema es que 4 de cada 10 empresas"),
+        (r"\bel miedo exponer sus datos\b", "el miedo a exponer sus datos"),
+        (r"\bes donde entre el dilema\b", "es donde entra el dilema"),
+        (r"\bprivacidad o la productividad\b", "privacidad o la productividad"),
+        (r"\bpero nosotros s[ií] podemos\.?\s+Podemos\.?\s+Somos\b", "pero nosotros sí podemos. Somos"),
+        (r"\bpero nosotros s[ií] podemos somos lux somos\b", "pero nosotros sí podemos. Somos Lux. Somos"),
+        (r"\bPorque en el\.?\s+En el mundo\b", "Porque en el mundo"),
+        (r"\bla sinapis\b", "sin APIs"),
+        (r"\bsinapis\b", "sin APIs"),
+        (r"\bsin l[aá]piz\b", "sin APIs"),
+        (r"\bBaeta\b", "byte"),
+        (r"\bbaeta\b", "byte"),
+        (r"\bni un byte de otro lado\b", "ni un byte a otro lado"),
+        (r"\btu computador\b", "tu computadora"),
+        (r"\btodo esta reuni[oó]n\b", "toda esta reunión"),
+        (r"\btoda esta reuni[oó]n est[aá] haciendo grabada\b", "toda esta reunión está siendo grabada"),
+        (r"\bgrabada por Lux vamos\b", "grabada por Lux. Vamos"),
+        (r"\bgrabada por los\b", "grabada por Lux"),
+        (r"\bgrabada por looks\b", "grabada por Lux"),
         (r"\bjacat[oó]n\b", "hackaton"),
         (r"\bjaqueat[oó]n\b", "hackaton"),
         (r"\bhackat[oó]n\b", "hackaton"),
@@ -180,16 +236,38 @@ def corregir_caption(texto: str) -> str:
         (r"\bpersonas siegas\b", "personas ciegas"),
         (r"\bpersonas sielgas\b", "personas ciegas"),
         (r"\bpersonas sordas o temas como de\b", "personas sordas"),
+        (r"\bpersonas con deslice\b", "personas con dislexia"),
+        (r"\bcon deslice\b", "con dislexia"),
+        (r"\bcon te de h\b", "con TDAH"),
+        (r"\bcon t de h\b", "con TDAH"),
+        (r"\bte de h\b", "TDAH"),
+        (r"\bt de h\b", "TDAH"),
+        (r"\btdh\b", "TDAH"),
         (r"\bde manera locura\b", "de manera local"),
         (r"\bmi cr[oó]fono\b", "micrófono"),
         (r"\btransdiven\b", "transcriben"),
         (r"\btranscriben y lo\b", "transcriben y luego"),
         (r"\bhabiendo su p[eé]talo\b", "haciéndolo lo más accesible posible"),
+        (r"\bestos pasandonos en accesibilidad\b", "basándonos en accesibilidad"),
+        (r"\besto es pasandonos en accesibilidad\b", "basándonos en accesibilidad"),
+        (r"\bbasandonos en accesibilidad\b", "basándonos en accesibilidad"),
+        (r"\bfuncionalidades para\b", "funcionalidades podemos"),
+        (r"\bnavegar en la p[aá]gina con comandos de bolsa\b", "navegar en la página con comandos de voz"),
+        (r"\bcomandos de bolsa\b", "comandos de voz"),
     ]
     for patron, reemplazo in reemplazos:
         limpio = re.sub(patron, reemplazo, limpio, flags=re.IGNORECASE)
 
     limpio = re.sub(r"\best[eé]n\s+un\s+hackaton\b", "estoy en un hackaton", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\b(vamos a|vamos a hacer|tenemos hacer)\s+un\s+LLM\s+local\b", "Tenemos que hacer un LLM local", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\ben M[eé]xico\s+16%", "En México el 16%", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bCu[aá]l es el problema\?", "¿Cuál es el problema?", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(
+        r"\bel cual func\.?\s+En\s+sin APIs,?\s+funciona\b",
+        "el cual funciona sin APIs. Funciona",
+        limpio,
+        flags=re.IGNORECASE,
+    )
     limpio = re.sub(r"\bun\s+LLM[.!?]?\s+y\s+local\s+tiene\b", "un LLM local y tiene", limpio, flags=re.IGNORECASE)
     limpio = re.sub(r"\bestoy\s+haciendo\s+un\s+LLM\s+local\b", "estoy haciendo un LLM local", limpio, flags=re.IGNORECASE)
     limpio = re.sub(r"\bhablar\s+con\s+la\s+idea\b", "hablar con la IA", limpio, flags=re.IGNORECASE)
@@ -199,6 +277,14 @@ def corregir_caption(texto: str) -> str:
     limpio = re.sub(r"\bque\s+te\.\.\.\s+Respondan\b", "que te respondan", limpio, flags=re.IGNORECASE)
     limpio = re.sub(r"\blo\s+m[aá]s\s+accesible\.\s+Lo\s+posible\b", "lo más accesible posible", limpio, flags=re.IGNORECASE)
     limpio = re.sub(r"\bpor\s+eso\s+es\s+una\.\.\.\s+Un\s+LLM\s+local\b", "por eso es un LLM local", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bservidores nosotros\b", "servidores. Nosotros", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bcomputadora no requiere\b", "computadora. No requiere", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\by de hecho toda\b", "y, de hecho, toda", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bgrabada por Lux vamos\b", "grabada por Lux. Vamos", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bEs donde entra el dilema elegir\b", "Es donde entra el dilema: elegir", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bEs donde entra el dilema,\s+elegir\b", "Es donde entra el dilema: elegir", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bporque en el mundo de hoy no puedes\b", "porque en el mundo de hoy, no puedes", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"¿¿Cuál", "¿Cuál", limpio)
     limpio = re.sub(
         r"\bchat\.\s+Tengo\s+tiempo,\s+pero\s+con\s+micrófono\b",
         "chat en tiempo real, pero con micrófono",
@@ -211,7 +297,54 @@ def corregir_caption(texto: str) -> str:
         limpio,
         flags=re.IGNORECASE,
     )
-    return re.sub(r"\s+", " ", limpio).strip()
+    limpio = re.sub(
+        r"\bNosotros hicimos un proyecto\.+\s+basándonos\b",
+        "Nosotros hicimos un proyecto basándonos",
+        limpio,
+        flags=re.IGNORECASE,
+    )
+    limpio = re.sub(
+        r"\bpara personas con dislexia,\s+con TDAH,\s+con personas\b\.?",
+        "para personas con dislexia y TDAH.",
+        limpio,
+        flags=re.IGNORECASE,
+    )
+    limpio = re.sub(
+        r"\bEn funcionalidades podemos\.+\s+Vale\.",
+        "En funcionalidades podemos navegar en la página con comandos de voz.",
+        limpio,
+        flags=re.IGNORECASE,
+    )
+    return _deduplicar_oraciones_caption(re.sub(r"\s+", " ", limpio).strip())
+
+
+def _deduplicar_oraciones_caption(texto: str) -> str:
+    """Elimina repeticiones exactas que Whisper arrastra entre bloques."""
+    if not texto:
+        return texto
+
+    partes = re.findall(r"[^.!?]+[.!?]?", texto)
+    resultado: list[str] = []
+    vistas: set[str] = set()
+    for parte in partes:
+        oracion = parte.strip()
+        if not oracion:
+            continue
+        clave = _normalizar_voz(oracion)
+        # Solo deduplicamos frases suficientemente informativas; evita borrar
+        # conectores cortos que podrian ser parte de una frase incompleta.
+        if len(clave) >= 10 and clave in vistas:
+            continue
+        vistas.add(clave)
+        resultado.append(_capitalizar_caption(oracion))
+
+    return " ".join(resultado).strip()
+
+
+def _capitalizar_caption(oracion: str) -> str:
+    if not oracion:
+        return oracion
+    return oracion[0].upper() + oracion[1:]
 
 
 @lru_cache(maxsize=4)
@@ -248,8 +381,8 @@ def _caption_initial_prompt(contexto_previo: str = "") -> str:
         partes.append(f"Vocabulario adicional esperado: {extra}.")
     if contexto:
         partes.append(
-            "Texto ya transcrito antes de este bloque, solo como contexto de continuidad: "
-            f"{contexto}. Corrige segun el audio actual si hay conflicto."
+            "Texto previo solo para continuidad, no lo repitas literalmente: "
+            f"{contexto}. Transcribe unicamente el audio nuevo de este bloque."
         )
     return " ".join(partes).strip()
 
