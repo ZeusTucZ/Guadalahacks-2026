@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import {
   Activity,
   AudioLines,
@@ -19,9 +19,10 @@ import { Sidebar, type AppView } from './components/Sidebar'
 import { MindMapView } from './components/MindMapView'
 import { MemoryTimelinePage } from './pages/MemoryTimelinePage'
 import { RecordingsPage } from './pages/RecordingsPage'
-import { useMinutero } from './useMinutero'
+import { useMinutero, type ImportantDate } from './useMinutero'
 
 const WAVEFORM = [3, 7, 5, 9, 4, 8, 6, 10, 5, 7, 4, 9, 6, 8, 5, 11, 4, 7, 6, 9]
+const TRANSCRIPT_PREVIEW_LIMIT = 180
 
 function Waveform({ color }: { color: 'purple' | 'teal' }) {
   const bar =
@@ -51,6 +52,7 @@ function scrollToRef(ref: RefObject<HTMLElement | null>) {
 
 export default function App() {
   const [view, setView] = useState<AppView>('dashboard')
+  const [previewExpanded, setPreviewExpanded] = useState(false)
   const m = useMinutero()
   const uploadRef = useRef<HTMLElement>(null)
   const outputsRef = useRef<HTMLElement>(null)
@@ -58,6 +60,15 @@ export default function App() {
   const statusRef = useRef<HTMLElement>(null)
 
   const localActive = m.ollamaOk && m.modelOk
+  const canExpandPreview = m.preview.length > TRANSCRIPT_PREVIEW_LIMIT
+  const previewText =
+    !previewExpanded && canExpandPreview
+      ? `${m.preview.slice(0, TRANSCRIPT_PREVIEW_LIMIT).trimEnd()}...`
+      : m.preview
+
+  useEffect(() => {
+    setPreviewExpanded(false)
+  }, [m.preview])
 
   return (
     <div className="flex min-h-screen bg-[#09090b] text-zinc-100">
@@ -72,7 +83,14 @@ export default function App() {
         {view === 'recordings' ? (
           <RecordingsPage minutero={m} />
         ) : view === 'timeline' ? (
-          <MemoryTimelinePage />
+          <MemoryTimelinePage
+            chatSessions={m.chatSessions}
+            activeChatId={m.activeChatId}
+            onOpenChat={(id) => {
+              m.openChatSession(id)
+              setView('recordings')
+            }}
+          />
         ) : (
           <>
         <header className="flex items-center gap-4 border-b border-zinc-800/60 px-4 py-4 md:px-8">
@@ -251,7 +269,18 @@ export default function App() {
                     <span className="text-xs text-zinc-600">Vista previa</span>
                   </div>
                   <h4 className="mt-4 font-semibold text-white">Transcripción</h4>
-                  <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-zinc-400">{m.preview}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-zinc-400">
+                    {previewText}
+                  </p>
+                  {canExpandPreview && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewExpanded((current) => !current)}
+                      className="mt-3 text-xs font-medium text-[#c7b8ea] transition hover:text-[#d4c8f0]"
+                    >
+                      {previewExpanded ? 'Ver menos' : 'Ver más'}
+                    </button>
+                  )}
                   <Waveform color="teal" />
                 </article>
               </div>
@@ -379,12 +408,16 @@ export default function App() {
                 </button>
               </div>
             </section>
+
+            <section className="mb-8 xl:hidden">
+              <WidgetDates dates={m.importantDates} />
+            </section>
           </main>
 
           {/* Right panel */}
           <aside className="hidden w-[300px] shrink-0 overflow-y-auto border-l border-zinc-800/60 bg-[#0c0c0e]/50 p-5 xl:block">
             <WidgetActionItems workEnabled={m.workEnabled} chunkCount={m.chunkCount} />
-            <WidgetDates />
+            <WidgetDates dates={m.importantDates} />
             <WidgetSmartInsights
               chunkCount={m.chunkCount}
               ollamaOk={m.ollamaOk}
@@ -474,32 +507,33 @@ function WidgetActionItems({
   )
 }
 
-function WidgetDates() {
-  const dates = [
-    { day: 'NOV', num: '15', title: 'Entrega del proyecto', desc: 'Fecha límite del sprint' },
-    { day: 'NOV', num: '22', title: 'Revisión trimestral', desc: 'Sesión de seguimiento' },
-  ]
-
+function WidgetDates({ dates }: { dates: ImportantDate[] }) {
   return (
     <article className="mb-5 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
       <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
         <Calendar className="h-4 w-4 text-zinc-500" />
         Fechas importantes
       </h4>
-      <ul className="space-y-4">
-        {dates.map((d) => (
-          <li key={d.title} className="flex gap-3">
-            <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800/50 text-center">
-              <span className="text-[9px] font-bold text-zinc-500">{d.day}</span>
-              <span className="text-sm font-bold text-white">{d.num}</span>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-white">{d.title}</p>
-              <p className="text-xs text-zinc-500">{d.desc}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {dates.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+          Cuando menciones una fecha en el chat, aparecerá aquí automáticamente.
+        </p>
+      ) : (
+        <ul className="space-y-4">
+          {dates.map((d) => (
+            <li key={d.id} className="flex gap-3">
+              <div className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800/50 text-center">
+                <span className="text-[9px] font-bold text-zinc-500">{d.day}</span>
+                <span className="text-sm font-bold text-white">{d.num}</span>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">{d.title}</p>
+                <p className="text-xs text-zinc-500">{d.desc}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </article>
   )
 }
