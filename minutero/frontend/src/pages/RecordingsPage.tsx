@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import {
   AudioLines,
   Bookmark,
@@ -20,7 +19,6 @@ import type { MinuteroController } from '../useMinutero'
 const LIVE_BARS = [
   4, 8, 6, 12, 7, 14, 9, 16, 11, 18, 8, 15, 10, 13, 6, 11, 9, 14, 7, 12, 10, 17, 8, 13, 11, 15, 9, 12, 6, 10,
 ]
-const TRANSCRIPT_PREVIEW_LIMIT = 180
 
 function LiveWaveform({ active }: { active: boolean }) {
   return (
@@ -39,7 +37,6 @@ function LiveWaveform({ active }: { active: boolean }) {
 }
 
 export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }) {
-  const [transcriptExpanded, setTranscriptExpanded] = useState(false)
   const recordingLabel = m.isRecording
     ? m.isPaused
       ? 'GRABACIÓN PAUSADA'
@@ -47,15 +44,6 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
     : m.uploadSelected
       ? 'AUDIO LISTO'
       : 'LISTO PARA GRABAR'
-  const canExpandTranscript = m.preview.length > TRANSCRIPT_PREVIEW_LIMIT
-  const transcriptText =
-    !transcriptExpanded && canExpandTranscript
-      ? `${m.preview.slice(0, TRANSCRIPT_PREVIEW_LIMIT).trimEnd()}...`
-      : m.preview
-
-  useEffect(() => {
-    setTranscriptExpanded(false)
-  }, [m.preview])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -107,18 +95,20 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
 
           {m.isRecording && (
             <div
-              className="relative mt-6 w-full max-w-2xl rounded-2xl border border-teal-500/30 bg-teal-500/5 px-4 py-3 text-sm leading-relaxed text-teal-100"
+              className="relative mt-6 w-full max-w-3xl rounded-2xl border border-teal-500/30 bg-teal-500/5 px-4 py-3 text-sm leading-relaxed text-teal-100"
               role="region"
               aria-label="Subtítulos en vivo"
               aria-live="polite"
+              aria-atomic="false"
+              aria-relevant="additions text"
             >
               <p className="mb-1 text-[10px] font-semibold tracking-[0.35em] text-teal-300">
                 SUBTÍTULOS EN VIVO
               </p>
-              <p className="min-h-[2.5rem] whitespace-pre-wrap text-base font-medium">
+              <p className="min-h-[2.5rem] whitespace-pre-wrap break-words text-left text-base font-medium">
                 {m.liveCaption || (
                   <span className="italic text-teal-300/60">
-                    Esperando audio... los subtítulos aparecerán aquí en unos segundos.
+                    Esperando audio. Los subtítulos aparecerán aquí en unos segundos.
                   </span>
                 )}
               </p>
@@ -215,18 +205,9 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
                 Transcripción
               </span>
               <p className="mt-5 whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">
-                {transcriptText}
+                {m.preview}
                 {m.isWorking && <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-[#c7b8ea]" />}
               </p>
-              {canExpandTranscript && (
-                <button
-                  type="button"
-                  onClick={() => setTranscriptExpanded((current) => !current)}
-                  className="mt-4 text-xs font-medium text-[#c7b8ea] transition hover:text-[#d4c8f0]"
-                >
-                  {transcriptExpanded ? 'Ver menos' : 'Ver más'}
-                </button>
-              )}
             </article>
 
             <div className={`grid gap-6 lg:grid-cols-2 ${!m.workEnabled ? 'pointer-events-none opacity-40' : ''}`}>

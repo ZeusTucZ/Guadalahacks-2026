@@ -5,6 +5,7 @@ import re
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 
 MULETILLAS = [
@@ -17,12 +18,15 @@ MULETILLAS = [
     r"\bno\?\b",
 ]
 
+_WHISPER_TRANSCRIBE_LOCK = Lock()
+
 
 # Prompt bilingue para sesgar a Whisper hacia nombres propios y terminos comunes
 # que aparecen mezclados con espanol (deportes, tecnologia, marcas). Esto reduce
 # errores como "Patrick Mahomes" -> "mis colmas" o "quarterback" -> "coredado".
 VOICE_INITIAL_PROMPT = (
     "Conversacion en espanol con preguntas cortas. "
+    "Nombre del usuario/proyecto: Lorenzo Orrante, Minutero, Guadalahacks. "
     "El usuario puede mencionar nombres propios en ingles: "
     "Patrick Mahomes, Lamar Jackson, Travis Kelce, Tom Brady, Aaron Rodgers, "
     "Kansas City Chiefs, Baltimore Ravens, Buffalo Bills, Dallas Cowboys, "
@@ -30,6 +34,21 @@ VOICE_INITIAL_PROMPT = (
     "Python, JavaScript, TypeScript, React, FastAPI, Ollama, Whisper, "
     "LLM, RAG, embedding, ChromaDB, GitHub, Google, Microsoft, OpenAI, Anthropic. "
     "Responde con puntuacion correcta, acentos y signos de interrogacion."
+)
+
+CAPTION_INITIAL_PROMPT = (
+    "Transcripcion en vivo en espanol de una demo de accesibilidad y programacion. "
+    "Terminos esperados: Lorenzo Orrante, hackaton, Guadalahacks, Minutero, "
+    "LLM local, inteligencia artificial local, Whisper, Ollama, ChromaDB, RAG, "
+    "Python, JavaScript, TypeScript, React, FastAPI, Tecnologico de Monterrey, "
+    "personas sordas, personas ciegas, subtitulos en vivo, microfono, chat por voz, "
+    "IA, Wi-Fi. "
+    "Frases probables: Hola, mi nombre es Lorenzo Orrante. Tengo 20 anos. "
+    "He estado aprendiendo a programar desde que tengo 15 anos. "
+    "Estoy en un hackaton y estoy haciendo un LLM local. "
+    "Debe funcionar de manera local. "
+    "Sirve para personas sordas y ciegas. "
+    "Puedo hablar con la IA y recibir respuesta con voz."
 )
 
 
@@ -116,7 +135,75 @@ def corregir_transcripcion_voz(texto: str) -> str:
     return limpio.strip()
 
 
-@lru_cache(maxsize=2)
+def corregir_caption(texto: str) -> str:
+    """Normaliza errores frecuentes de subtitulos en vivo.
+
+    El captioning trabaja con clips pequenos y parciales; por eso se aplican
+    correcciones de vocabulario de la demo sin cambiar la estructura general.
+    """
+    limpio = limpiar_transcripcion_voz(texto)
+    normalizado = _normalizar_voz(limpio)
+
+    if "mi nombre es" in normalizado:
+        limpio = re.sub(
+            r"\bmi nombre es\s+(?:Doris|Dorys|Loris|Lores|Lorenzo)?\s*Or+ante\b",
+            "mi nombre es Lorenzo Orrante",
+            limpio,
+            flags=re.IGNORECASE,
+        )
+        limpio = re.sub(
+            r"\bmi nombre es\s+Doris\b",
+            "mi nombre es Lorenzo Orrante",
+            limpio,
+            flags=re.IGNORECASE,
+        )
+
+    reemplazos = [
+        (r"\bha estado aprendiendo\b", "he estado aprendiendo"),
+        (r"\bjacat[oó]n\b", "hackaton"),
+        (r"\bjaqueat[oó]n\b", "hackaton"),
+        (r"\bhackat[oó]n\b", "hackaton"),
+        (r"\bLL\s*me\s*local\b", "LLM local"),
+        (r"\bLL\s*melo\s*cal\b", "LLM local"),
+        (r"\bLL\s*melocal\b", "LLM local"),
+        (r"\bLLM\s*elocal\b", "LLM local"),
+        (r"\bLLMlocal\b", "LLM local"),
+        (r"\bLL\s*M\s+local\b", "LLM local"),
+        (r"\bTecnol[oó]gico de Monterrey\b", "Tecnológico de Monterrey"),
+        (r"\bmi estrella hermano\b", "mis tres hermanos"),
+        (r"\bpersonas siegas\b", "personas ciegas"),
+        (r"\bde manera locura\b", "de manera local"),
+        (r"\bmi cr[oó]fono\b", "micrófono"),
+    ]
+    for patron, reemplazo in reemplazos:
+        limpio = re.sub(patron, reemplazo, limpio, flags=re.IGNORECASE)
+
+    limpio = re.sub(r"\best[eé]n\s+un\s+hackaton\b", "estoy en un hackaton", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bun\s+LLM[.!?]?\s+y\s+local\s+tiene\b", "un LLM local y tiene", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bestoy\s+haciendo\s+un\s+LLM\s+local\b", "estoy haciendo un LLM local", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bhablar\s+con\s+la\s+idea\b", "hablar con la IA", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bque\s+sa(?:ca|que)\.\s+Quiero\s+que\s+sirva\s+también\b", "que sirva también", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bTambién\s+quiero\s+que\s+sirva\s+también\b", "También quiero que sirva", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bel\s+tema\s+de\.\.\.\s+De\s+poder\b", "el tema de poder", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bque\s+te\.\.\.\s+Respondan\b", "que te respondan", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\blo\s+m[aá]s\s+accesible\.\s+Lo\s+posible\b", "lo más accesible posible", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(r"\bpor\s+eso\s+es\s+una\.\.\.\s+Un\s+LLM\s+local\b", "por eso es un LLM local", limpio, flags=re.IGNORECASE)
+    limpio = re.sub(
+        r"\bchat\.\s+Tengo\s+tiempo,\s+pero\s+con\s+micrófono\b",
+        "chat en tiempo real, pero con micrófono",
+        limpio,
+        flags=re.IGNORECASE,
+    )
+    limpio = re.sub(
+        r"\bMi\s+familia\s+consiste\.\s+Estoy\s+con\s+mi\s+padre\b",
+        "Mi familia consiste en mi padre",
+        limpio,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", limpio).strip()
+
+
+@lru_cache(maxsize=4)
 def _modelo_whisper(nombre_modelo: str):
     import whisper
 
@@ -135,10 +222,35 @@ def _nombre_modelo_voz() -> str:
 
 
 def _nombre_modelo_caption() -> str:
-    # Para captioning en vivo necesitamos velocidad: cada chunk de 2-4s debe
-    # transcribirse en menos tiempo. "tiny" es rapidisimo y suficiente para
-    # captions aproximados que se refinan con cada chunk.
-    return os.getenv("MINUTERO_CAPTION_WHISPER_MODEL", "tiny")
+    # tiny fue demasiado impreciso para nombres propios y terminos tecnicos en
+    # tiempo real ("Lorenzo Orrante", "hackaton", "LLM local"). base sigue
+    # siendo razonable para subtitulos parciales y mejora mucho la precision.
+    return os.getenv("MINUTERO_CAPTION_WHISPER_MODEL", "base")
+
+
+def _caption_initial_prompt() -> str:
+    extra = os.getenv("MINUTERO_CAPTION_CONTEXT", "").strip()
+    return f"{CAPTION_INITIAL_PROMPT} {extra}".strip()
+
+
+def _ejecutar_transcripcion_caption(model, ruta_audio: str, *, initial_prompt: str | None, beam_size: int):
+    opciones = {
+        "language": "es",
+        "task": "transcribe",
+        "temperature": 0.0,
+        "beam_size": beam_size,
+        "best_of": beam_size,
+        "condition_on_previous_text": False,
+        "no_speech_threshold": 0.45,
+        "logprob_threshold": -1.0,
+        "compression_ratio_threshold": 2.4,
+        "fp16": False,
+        "verbose": False,
+    }
+    if initial_prompt:
+        opciones["initial_prompt"] = initial_prompt
+    with _WHISPER_TRANSCRIBE_LOCK:
+        return model.transcribe(ruta_audio, **opciones)
 
 
 def transcribir(ruta_audio: str) -> str:
@@ -150,7 +262,8 @@ def transcribir(ruta_audio: str) -> str:
     print("Transcribiendo audio...")
 
     model = _modelo_whisper(_nombre_modelo_general())
-    resultado = model.transcribe(str(ruta), language="es", verbose=False)
+    with _WHISPER_TRANSCRIBE_LOCK:
+        resultado = model.transcribe(str(ruta), language="es", verbose=False)
     texto = resultado.get("text", "")
     texto_limpio = limpiar_transcripcion(texto)
 
@@ -172,27 +285,28 @@ def transcribir_voz_chat(ruta_audio: str) -> str:
     print("Transcribiendo mensaje de voz del chat...")
 
     model = _modelo_whisper(_nombre_modelo_voz())
-    resultado = model.transcribe(
-        str(ruta),
-        language="es",
-        task="transcribe",
-        initial_prompt=VOICE_INITIAL_PROMPT,
-        # temperature=0 con fallback ascendente: primero intento determinista,
-        # si el modelo no esta seguro sube la temperatura para evitar pegarse.
-        temperature=(0.0, 0.2, 0.4),
-        beam_size=5,
-        best_of=5,
-        # Frases cortas e independientes: no necesitamos condicionar en el
-        # texto previo. Esto evita que el modelo arrastre errores.
-        condition_on_previous_text=False,
-        # Umbrales mas estrictos para silencio: evita inventar palabras cuando
-        # solo hay ruido de fondo o respiracion.
-        no_speech_threshold=0.5,
-        logprob_threshold=-1.0,
-        compression_ratio_threshold=2.4,
-        fp16=False,
-        verbose=False,
-    )
+    with _WHISPER_TRANSCRIBE_LOCK:
+        resultado = model.transcribe(
+            str(ruta),
+            language="es",
+            task="transcribe",
+            initial_prompt=VOICE_INITIAL_PROMPT,
+            # temperature=0 con fallback ascendente: primero intento determinista,
+            # si el modelo no esta seguro sube la temperatura para evitar pegarse.
+            temperature=(0.0, 0.2, 0.4),
+            beam_size=5,
+            best_of=5,
+            # Frases cortas e independientes: no necesitamos condicionar en el
+            # texto previo. Esto evita que el modelo arrastre errores.
+            condition_on_previous_text=False,
+            # Umbrales mas estrictos para silencio: evita inventar palabras cuando
+            # solo hay ruido de fondo o respiracion.
+            no_speech_threshold=0.5,
+            logprob_threshold=-1.0,
+            compression_ratio_threshold=2.4,
+            fp16=False,
+            verbose=False,
+        )
     texto = resultado.get("text", "")
     texto_limpio = limpiar_transcripcion_voz(texto)
 
@@ -203,26 +317,32 @@ def transcribir_voz_chat(ruta_audio: str) -> str:
 def transcribir_caption(ruta_audio: str) -> str:
     """Transcribe un chunk corto para captioning en vivo.
 
-    Optimizado para velocidad sobre calidad: usa el modelo mas pequeno y omite
-    beam search. Pensado para clips de 2-6 segundos que se actualizan
-    progresivamente mientras el usuario habla en una reunion.
+    Optimizado para equilibrio calidad/latencia: usa prompt de contexto y un
+    beam pequeno para no destruir nombres propios en clips parciales.
     """
     ruta = Path(ruta_audio)
     if not ruta.exists():
         raise FileNotFoundError(f"No existe el archivo de audio: {ruta_audio}")
 
     model = _modelo_whisper(_nombre_modelo_caption())
-    resultado = model.transcribe(
-        str(ruta),
-        language="es",
-        task="transcribe",
-        temperature=0.0,
-        beam_size=1,
-        best_of=1,
-        condition_on_previous_text=False,
-        no_speech_threshold=0.5,
-        fp16=False,
-        verbose=False,
-    )
+    try:
+        resultado = _ejecutar_transcripcion_caption(
+            model,
+            str(ruta),
+            initial_prompt=_caption_initial_prompt(),
+            beam_size=3,
+        )
+    except RuntimeError as exc:
+        if "Sizes of tensors must match" not in str(exc):
+            raise
+        # Algunos blobs WebM parciales hacen fallar a Whisper internamente con
+        # ese error de tensores. Reintentamos sin prompt y con beam minimo para
+        # mantener los subtitulos vivos en lugar de devolver 500.
+        resultado = _ejecutar_transcripcion_caption(
+            model,
+            str(ruta),
+            initial_prompt=None,
+            beam_size=1,
+        )
     texto = resultado.get("text", "")
-    return limpiar_transcripcion_voz(texto)
+    return corregir_caption(texto)

@@ -737,12 +737,48 @@ function beepError() {
   playBeep(220, 220)
 }
 
+function normalizeCaptionForCompare(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function mergeCaptionText(current: string, incoming: string) {
+  const next = incoming.replace(/\s+/g, ' ').trim()
+  if (!next) return current
+  if (!current.trim()) return next
+
+  const normalizedCurrent = normalizeCaptionForCompare(current)
+  const normalizedNext = normalizeCaptionForCompare(next)
+  if (normalizedCurrent.endsWith(normalizedNext)) return current
+
+  const maxOverlap = Math.min(120, current.length, next.length)
+  for (let size = maxOverlap; size >= 16; size -= 1) {
+    const currentTail = normalizeCaptionForCompare(current.slice(-size))
+    const nextHead = normalizeCaptionForCompare(next.slice(0, size))
+    if (currentTail && currentTail === nextHead) {
+      return `${current}${next.slice(size)}`
+    }
+  }
+
+  return `${current.trimEnd()} ${next}`
+}
+
 export function useMinutero() {
   const fileRef = useRef<File | null>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recordingChunksRef = useRef<BlobPart[]>([])
+  const captionRecorderRef = useRef<MediaRecorder | null>(null)
+  const captionStreamRef = useRef<MediaStream | null>(null)
+  const captionChunksRef = useRef<BlobPart[]>([])
+  const captionUploadChainRef = useRef(Promise.resolve())
+  const captionRunIdRef = useRef(0)
+  const liveCaptionTextRef = useRef('')
   const recordingStartedAtRef = useRef<number | null>(null)
   const recordingTimerRef = useRef<number | null>(null)
   const recordingUrlRef = useRef<string | null>(null)
@@ -1045,27 +1081,45 @@ export function useMinutero() {
   }, [])
 
   const stopLiveCaptionLoop = useCallback(() => {
+    captionRunIdRef.current += 1
     if (liveCaptionIntervalRef.current) {
       window.clearInterval(liveCaptionIntervalRef.current)
       liveCaptionIntervalRef.current = null
     }
     liveCaptionAbortRef.current?.abort()
     liveCaptionAbortRef.current = null
+    captionUploadChainRef.current = Promise.resolve()
+    const captionRecorder = captionRecorderRef.current
+    captionRecorderRef.current = null
+    if (captionRecorder && captionRecorder.state !== 'inactive') {
+      captionRecorder.ondataavailable = null
+      captionRecorder.onstop = null
+      try {
+        captionRecorder.stop()
+      } catch {
+        // Puede estar cerrandose por un tick del intervalo.
+      }
+    }
+    captionChunksRef.current = []
+    captionStreamRef.current?.getTracks().forEach((track) => track.stop())
+    captionStreamRef.current = null
   }, [])
 
-  // Envia los chunks acumulados al endpoint /caption para mostrar texto en
-  // tiempo real durante la grabacion. Util para personas sordas que asisten
-  // a la reunion: pueden leer mientras los demas hablan.
-  const startLiveCaptionLoop = useCallback((mimeType: string) => {
+  // Envia bloques cortos e independientes al endpoint /caption y conserva el
+  // transcript completo. Esto evita mandar a Whisper audios cada vez mas largos.
+  const startLiveCaptionLoop = useCallback((stream: MediaStream, mimeType: string) => {
     stopLiveCaptionLoop()
+    const runId = captionRunIdRef.current + 1
+    captionRunIdRef.current = runId
+    captionUploadChainRef.current = Promise.resolve()
+    liveCaptionTextRef.current = ''
     setLiveCaption('')
 
-    const enviarChunkAcumulado = async () => {
-      if (recordingChunksRef.current.length === 0) return
-      // Tomamos una copia del buffer actual. webm/opus es contenedor
-      // streamable; el primer chunk contiene los headers y los siguientes
-      // se concatenan. Whisper acepta el resultado.
-      const blob = new Blob(recordingChunksRef.current, { type: mimeType || 'audio/webm' })
+    const captionStream = stream.clone()
+    captionStreamRef.current = captionStream
+
+    const enviarBlobCaption = async (blob: Blob) => {
+      if (captionRunIdRef.current !== runId) return
       if (blob.size < 4000) return // muy poco audio, omitimos
 
       const file = new File([blob], `caption.${extensionForMimeType(blob.type)}`, {
@@ -1074,7 +1128,6 @@ export function useMinutero() {
       const form = new FormData()
       form.append('audio', file)
 
-      liveCaptionAbortRef.current?.abort()
       const controller = new AbortController()
       liveCaptionAbortRef.current = controller
       try {
@@ -1085,19 +1138,63 @@ export function useMinutero() {
         })
         if (!response.ok) return
         const data = await response.json()
+        if (captionRunIdRef.current !== runId) return
         const texto = String(data?.texto || '').trim()
-        if (texto) setLiveCaption(texto)
+        if (texto) {
+          const merged = mergeCaptionText(liveCaptionTextRef.current, texto)
+          liveCaptionTextRef.current = merged
+          setLiveCaption(merged)
+        }
       } catch {
         // Aborted o error de red: ignoramos y reintentamos al siguiente tick.
+      } finally {
+        if (liveCaptionAbortRef.current === controller) {
+          liveCaptionAbortRef.current = null
+        }
       }
     }
 
-    // Primera transcripcion a los pocos segundos; luego se actualiza con el
-    // audio acumulado. MediaRecorder debe iniciar con timeslice para que haya
-    // dataavailable mientras graba, no solo al detener.
-    // demasiado pequeno, enviarChunkAcumulado lo omitira.
+    const iniciarSegmentoCaption = () => {
+      if (!captionStream.active || !window.MediaRecorder) return
+      try {
+        const recorder = new MediaRecorder(captionStream, mimeType ? { mimeType } : undefined)
+        captionChunksRef.current = []
+        captionRecorderRef.current = recorder
+
+        recorder.ondataavailable = (event) => {
+          if (event.data?.size > 0) captionChunksRef.current.push(event.data)
+        }
+
+        recorder.onstop = () => {
+          const chunks = captionChunksRef.current
+          captionChunksRef.current = []
+          captionRecorderRef.current = null
+
+          if (liveCaptionIntervalRef.current && mediaRecorderRef.current?.state === 'recording') {
+            iniciarSegmentoCaption()
+          }
+
+          if (chunks.length > 0) {
+            const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' })
+            captionUploadChainRef.current = captionUploadChainRef.current
+              .then(() => enviarBlobCaption(blob))
+              .catch(() => undefined)
+          }
+        }
+
+        recorder.start()
+      } catch {
+        // Si el navegador no permite un recorder secundario, simplemente se
+        // omite el captioning sin afectar la grabacion principal.
+      }
+    }
+
+    iniciarSegmentoCaption()
     liveCaptionIntervalRef.current = window.setInterval(() => {
-      void enviarChunkAcumulado()
+      const recorder = captionRecorderRef.current
+      if (recorder?.state === 'recording') {
+        recorder.stop()
+      }
     }, LIVE_CAPTION_INTERVAL_MS)
   }, [stopLiveCaptionLoop])
 
@@ -1239,7 +1336,7 @@ export function useMinutero() {
       setMarkers([])
       setUploadMessage('Grabando localmente. Subtítulos en vivo activos.')
       startRecordingTimer()
-      startLiveCaptionLoop(recorder.mimeType || mimeType)
+      startLiveCaptionLoop(stream, recorder.mimeType || mimeType)
     } catch {
       setIsRecording(false)
       setIsPaused(false)
@@ -1263,13 +1360,19 @@ export function useMinutero() {
 
     if (recorder.state === 'recording') {
       recorder.pause()
+      if (captionRecorderRef.current?.state === 'recording') {
+        captionRecorderRef.current.pause()
+      }
       setIsPaused(true)
       setUploadMessage('Grabación pausada.')
       stopRecordingTimer()
     } else if (recorder.state === 'paused') {
       recorder.resume()
+      if (captionRecorderRef.current?.state === 'paused') {
+        captionRecorderRef.current.resume()
+      }
       setIsPaused(false)
-      setUploadMessage('Grabando localmente desde el navegador.')
+      setUploadMessage('Grabando localmente. Subtítulos en vivo activos.')
       startRecordingTimer()
     }
   }, [startRecordingTimer, stopRecordingTimer])

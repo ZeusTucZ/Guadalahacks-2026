@@ -52,6 +52,17 @@ MINUTERO_VOICE_WHISPER_MODEL=medium uvicorn main:app --reload --port 8000
 
 Opciones de calidad/velocidad: `tiny` < `base` < `small` (por defecto) < `medium` < `large`. En Mac Apple Silicon, `small` corre rapido y mejora dramaticamente la precision con nombres propios y terminos tecnicos. Si tu maquina es lenta, baja a `base`.
 
+Para subtitulos en vivo, Minutero usa por defecto `MINUTERO_CAPTION_WHISPER_MODEL=base`.
+`tiny` es mas rapido, pero confunde nombres y terminos tecnicos con mucha
+facilidad. Puedes reforzar el vocabulario esperado de una demo con:
+
+```bash
+MINUTERO_CAPTION_CONTEXT="Lorenzo Orrante, hackaton, LLM local" uvicorn main:app --reload --port 8000
+```
+
+Los subtitulos no aparecen palabra por palabra. Se actualizan por bloques cada
+3-5 segundos para darle a Whisper suficiente audio.
+
 ## Requisitos del sistema
 
 1. Python 3.10+
