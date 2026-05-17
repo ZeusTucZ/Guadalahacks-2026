@@ -208,6 +208,45 @@ def _respuesta_definicion_general(mensaje: str) -> str | None:
     return None
 
 
+def _respuesta_deportes_general(mensaje: str) -> str | None:
+    texto = _normalizar_texto(mensaje)
+
+    if re.search(r"\bpatrick\s+mahomes\b", texto):
+        if re.search(r"\b(donde|juega|equipo)\b", texto):
+            return (
+                "Fuente: Conocimiento general local\n"
+                "Respuesta: Patrick Mahomes juega como quarterback en los Kansas City Chiefs."
+            )
+        if re.search(r"\b(quien es|que sabes|hablame|cuentame)\b", texto):
+            return (
+                "Fuente: Conocimiento general local\n"
+                "Respuesta: Patrick Mahomes es un quarterback de la NFL. Juega para los "
+                "Kansas City Chiefs y es conocido por su brazo fuerte, movilidad y creatividad."
+            )
+
+    if re.search(r"\blamar\s+jackson\b", texto):
+        if re.search(r"\b(donde|juega|equipo)\b", texto):
+            return (
+                "Fuente: Conocimiento general local\n"
+                "Respuesta: Lamar Jackson juega como quarterback en los Baltimore Ravens."
+            )
+        if re.search(r"\b(quien es|que sabes|hablame|cuentame)\b", texto):
+            return (
+                "Fuente: Conocimiento general local\n"
+                "Respuesta: Lamar Jackson es un quarterback de la NFL. Juega para los "
+                "Baltimore Ravens y destaca por su velocidad, movilidad y capacidad para correr."
+            )
+
+    if re.search(r"\b(quien es|cual es|dime|menciona)\b.*\bbuen\s+quarterback\b", texto):
+        return (
+            "Fuente: Conocimiento general local\n"
+            "Respuesta: Patrick Mahomes es un buen ejemplo de quarterback. También Lamar "
+            "Jackson es muy destacado por su movilidad y juego terrestre."
+        )
+
+    return None
+
+
 def _mensajes_usuario(historial: list[dict[str, str]], mensaje: str | None = None) -> list[str]:
     mensajes = [
         turno["content"]
@@ -426,6 +465,113 @@ def _tokens_significativos(texto: str) -> list[str]:
     return [token for token in tokens if token not in stopwords and len(token) > 2]
 
 
+# Palabras interrogativas y articulos que podrian aparecer capitalizadas al
+# inicio de una pregunta. Las filtramos para no considerarlas entidades.
+_PALABRAS_NO_ENTIDAD = {
+    "que",
+    "quien",
+    "donde",
+    "cuando",
+    "cuanto",
+    "cuantos",
+    "cuantas",
+    "como",
+    "cual",
+    "cuales",
+    "el",
+    "la",
+    "los",
+    "las",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "del",
+    "de",
+    "y",
+    "o",
+    "no",
+    "si",
+    "tu",
+    "tus",
+    "su",
+    "sus",
+    "es",
+    "son",
+    "lo",
+    "este",
+    "esta",
+    "estos",
+    "estas",
+    "ese",
+    "esa",
+    "esto",
+    "porque",
+    "para",
+    "por",
+    "con",
+    "sin",
+}
+
+
+def _entidades_propias(mensaje: str) -> list[str]:
+    """Extrae nombres propios y acronimos mencionados en la pregunta.
+
+    Detecta secuencias capitalizadas tipo "Patrick Mahomes" o "Lamar Jackson"
+    y siglas tipo "NFL" o "NBA". Filtra palabras interrogativas (Quién, Qué,
+    Cuándo, etc.) que aparecen capitalizadas al inicio de la frase.
+    """
+    nombre_propio = r"[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*"
+    acronimo = r"[A-Z]{2,}"
+    patron = rf"\b({nombre_propio}|{acronimo})\b"
+
+    entidades: list[str] = []
+    vistos: set[str] = set()
+    for match in re.finditer(patron, mensaje):
+        entidad = match.group(1).strip()
+        clave = _normalizar_texto(entidad)
+        if not clave or clave in _PALABRAS_NO_ENTIDAD:
+            continue
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        entidades.append(entidad)
+    return entidades
+
+
+def _entidad_en_contexto(entidad: str, contexto: str) -> bool:
+    """Confirma que una entidad de la pregunta aparece en el contexto indexado."""
+    contexto_normalizado = _normalizar_texto(contexto)
+    entidad_normalizada = _normalizar_texto(entidad)
+    if not entidad_normalizada:
+        return False
+
+    # Para nombres compuestos, basta con que aparezca el apellido o cualquier
+    # token significativo (>3 chars) para considerar que el contexto habla del
+    # mismo entidad. "Patrick Mahomes" matchea si aparece "Mahomes" en contexto.
+    tokens = [t for t in entidad_normalizada.split() if len(t) > 2]
+    if not tokens:
+        return False
+    return any(
+        re.search(rf"\b{re.escape(token)}\b", contexto_normalizado) for token in tokens
+    )
+
+
+def _pregunta_es_sobre_grabacion(mensaje: str, contexto: str) -> bool:
+    """Indica si la pregunta puede responderse desde la grabacion indexada.
+
+    Si la pregunta menciona entidades propias (nombres, siglas) que no aparecen
+    en el contexto, asumimos que es una pregunta de conocimiento general y la
+    grabacion no aplica.
+    """
+    entidades = _entidades_propias(mensaje)
+    if not entidades:
+        # Sin entidades propias: la pregunta es generica, decidiremos por
+        # otros heuristicos (palabras tipo "grabacion", "audio", etc.).
+        return True
+    return all(_entidad_en_contexto(entidad, contexto) for entidad in entidades)
+
+
 def _tema_en_contexto(tema: str, contexto: str) -> bool:
     contexto_normalizado = _normalizar_texto(contexto)
     tokens = _tokens_significativos(tema)
@@ -434,13 +580,29 @@ def _tema_en_contexto(tema: str, contexto: str) -> bool:
     return all(re.search(rf"\b{re.escape(token)}\b", contexto_normalizado) for token in tokens)
 
 
-def _fuente_sugerida(mensaje: str, historial: list[dict[str, str]] | None = None) -> str:
+def _fuente_sugerida(
+    mensaje: str,
+    historial: list[dict[str, str]] | None = None,
+    contexto: str | None = None,
+) -> str:
     texto = _normalizar_texto(mensaje)
     historial_limpio = _normalizar_historial(historial or [])
     hay_hechos_usuario = any(turno["role"] == "user" for turno in historial_limpio)
 
+    # Si la pregunta cita explicitamente la grabacion ("¿que dijo X?"), insistimos
+    # en grabacion aunque no haya match de entidad.
     if _extraer_tema_mencion_grabacion(mensaje):
         return "Grabacion"
+
+    # Si el usuario nombra entidades propias (Patrick Mahomes, NFL, Lamar Jackson)
+    # que NO aparecen en el contexto indexado, la pregunta es de conocimiento
+    # general — no debemos atribuirla a la grabacion ni forzar al LLM a inventar.
+    entidades = _entidades_propias(mensaje)
+    if contexto is not None and entidades:
+        fuera_de_contexto = [e for e in entidades if not _entidad_en_contexto(e, contexto)]
+        if fuera_de_contexto and len(fuera_de_contexto) == len(entidades):
+            return "Conocimiento general local"
+
     if re.search(r"\b(hablame|cuentame|dime algo|que sabes)\b", texto):
         if not re.search(r"\b(lorenzo|grabacion|audio|reunion|menciono|dijo|producto)\b", texto):
             return "Conocimiento general local"
@@ -448,7 +610,10 @@ def _fuente_sugerida(mensaje: str, historial: list[dict[str, str]] | None = None
         return "Grabacion"
     if re.search(r"\b(opinas|opinion|opinión|que te parece|qué te parece|retroalimentacion|retroalimentación)\b", texto):
         return "Grabacion + Conocimiento general local"
-    if re.search(r"\b(que es|que significa|define|explica|cuantos jugadores|futbol|fútbol)\b", texto):
+    if re.search(r"\b(que es|que significa|define|explica|cuantos jugadores|futbol|fútbol|nfl|nba|mlb|quarterback|temporada)\b", texto):
+        return "Conocimiento general local"
+    # "Quien es un/una/los mejores X" es definicion/recomendacion generica.
+    if re.search(r"\bquien es (un|una|unos|unas|el mejor|la mejor|los mejores|las mejores)\b", texto):
         return "Conocimiento general local"
     if _es_pregunta_configuracion(mensaje):
         return "Configuracion local"
@@ -457,10 +622,16 @@ def _fuente_sugerida(mensaje: str, historial: list[dict[str, str]] | None = None
     if re.search(r"\b(grabacion|grabación|audio|transcripcion|transcripción|reunion|reunión|dijo|menciono|mencionó)\b", texto):
         return "Grabacion"
     if re.search(r"\b(quien|quién|cuantos|cuántos|cual|cuál|cuando|cuándo|donde|dónde|altura|mide)\b", texto):
-        return "Grabacion + Chat" if hay_hechos_usuario else "Grabacion"
+        # Solo asumimos grabacion si la pregunta no menciona entidades externas
+        # o si esas entidades estan en el contexto.
+        if contexto is None or not entidades or all(
+            _entidad_en_contexto(e, contexto) for e in entidades
+        ):
+            return "Grabacion + Chat" if hay_hechos_usuario else "Grabacion"
+        return "Conocimiento general local"
     if re.search(r"\b(recomienda|sugerencia|mejora|proyecto)\b", texto):
         return "Grabacion + Chat"
-    return "Primero usa Grabacion y Chat; si no aplica, Conocimiento general local."
+    return "Conocimiento general local"
 
 
 def _fuente_normalizada(fuente_sugerida: str) -> str:
@@ -535,17 +706,47 @@ def _respuesta_grabacion_directa(mensaje: str, contexto: str) -> str | None:
     if tema_mencion and not _tema_en_contexto(tema_mencion, contexto):
         return "Fuente: No encontrado\nRespuesta: No encontrado en la grabacion."
 
+    # Si la pregunta menciona entidades propias (Patrick Mahomes, NFL, etc.)
+    # que no aparecen en el contexto, no usamos atajos hacia la grabacion: la
+    # respuesta debe venir del LLM con fuente "Conocimiento general local".
+    if not _pregunta_es_sobre_grabacion(mensaje, contexto):
+        return None
+
     if re.search(r"\blorenzo\b", texto) and re.search(r"\b(desarrolla|desarrollando|crea|creando|producto)\b", texto):
         descripcion = _describe_producto_desde_contexto(contexto)
         if descripcion:
             return f"Fuente: Grabacion\nRespuesta: {descripcion}"
 
+    # "Cuantos anos / edad" solo aplica si la persona del contexto es la
+    # referenciada (mencionando "Lorenzo" o sin entidad propia).
     if re.search(r"\b(cuantos anos|edad|anos tiene)\b", texto):
         edad = _extraer_edad(contexto)
-        if edad:
+        if edad and (re.search(r"\blorenzo\b", texto) or not _entidades_propias(mensaje)):
             return f"Fuente: Grabacion\nRespuesta: Lorenzo tiene {edad} años."
 
-    if re.search(r"\b(quien es lorenzo|quien es)\b", texto):
+    # "Quien es" solo dispara para "quien es lorenzo" o cuando el nombre
+    # mencionado coincide con el del contexto. Antes este branch devolvia
+    # "Lorenzo" para cualquier "quien es X" (incluido Patrick Mahomes).
+    pregunta_sobre_lorenzo = bool(re.search(r"\bquien es lorenzo\b", texto))
+    entidades = _entidades_propias(mensaje)
+    if not pregunta_sobre_lorenzo and entidades:
+        nombre_contexto = _extraer_nombre(contexto)
+        nombre_contexto_norm = _normalizar_texto(nombre_contexto or "")
+        if not any(
+            nombre_contexto_norm and _normalizar_texto(e).startswith(nombre_contexto_norm.split()[0])
+            for e in entidades
+        ):
+            return None
+
+    # "Quien es un/una/unos/unas X" es una pregunta genérica/definición y no
+    # se refiere al sujeto de la grabacion. Ej: "quien es un buen quarterback".
+    pregunta_generica = bool(re.search(r"\bquien es (un|una|unos|unas|el mejor|la mejor|los mejores|las mejores)\b", texto))
+
+    if (
+        re.search(r"\bquien es\b", texto)
+        and (pregunta_sobre_lorenzo or not entidades)
+        and not pregunta_generica
+    ):
         nombre = _extraer_nombre(contexto) or "Lorenzo"
         edad = _extraer_edad(contexto)
         descripcion = f"{nombre}"
@@ -762,9 +963,30 @@ def _limpiar_resumen(contexto: str, resumen: str) -> str:
 
 
 def generar_resumen_seguro(contexto: str) -> Iterator[str]:
-    resumen = texto_con_prompt(prompt_resumen(contexto), num_predict=LLM_NUM_PREDICT)
-    resumen = _limpiar_resumen(contexto, resumen)
-    yield resumen
+    """Stream del resumen token por token con post-procesado al final.
+
+    Antes esta funcion bloqueaba hasta tener el resumen completo (15-40s) y
+    luego yieldeaba todo de golpe. Eso provocaba 502 en proxies con timeout de
+    ~30s. Ahora streameamos los tokens segun llegan de Ollama (primer token en
+    1-3s) y al final aplicamos el modo seguro con un marcador especial que el
+    cliente interpreta como "reemplaza lo anterior con esto".
+    """
+    buffer: list[str] = []
+    for token in stream_con_prompt(prompt_resumen(contexto)):
+        buffer.append(token)
+        yield token
+
+    raw = "".join(buffer).strip()
+    if not raw:
+        return
+
+    cleaned = _limpiar_resumen(contexto, raw)
+    if cleaned.strip() == raw.strip():
+        return
+    # Marcador para que el frontend reemplace el resumen mostrado con la
+    # version corregida una vez termina el stream.
+    yield "[[REWRITE]]"
+    yield cleaned
 
 
 def _titulo_mapa(contexto: str) -> str:
@@ -839,7 +1061,22 @@ def generar_respuesta(pregunta: str) -> Iterator[str]:
     yield from stream_con_prompt(prompt)
 
 
-def generar_chat(mensaje: str, historial: list[dict[str, str]]) -> Iterator[str]:
+EASY_READ_INSTRUCTIONS = (
+    "MODO LECTURA FACIL ACTIVADO. Reglas adicionales obligatorias:\n"
+    "- Usa frases cortas, maximo 12 palabras por frase.\n"
+    "- Vocabulario nivel A2 (basico). Evita tecnicismos.\n"
+    "- Si tienes que usar un termino tecnico, explicalo entre parentesis.\n"
+    "- Una idea por frase. Una linea en blanco entre ideas.\n"
+    "- No uses metaforas, ironia ni sarcasmo.\n"
+    "- Mantente fiel al contenido pero simplifica."
+)
+
+
+def generar_chat(
+    mensaje: str,
+    historial: list[dict[str, str]],
+    modo_lectura_facil: bool = False,
+) -> Iterator[str]:
     respuesta_memoria = _respuesta_memoria_actual(mensaje, historial)
     if respuesta_memoria:
         yield respuesta_memoria
@@ -853,6 +1090,11 @@ def generar_chat(mensaje: str, historial: list[dict[str, str]]) -> Iterator[str]
     respuesta_definicion = _respuesta_definicion_general(mensaje)
     if respuesta_definicion:
         yield respuesta_definicion
+        return
+
+    respuesta_deportes = _respuesta_deportes_general(mensaje)
+    if respuesta_deportes:
+        yield respuesta_deportes
         return
 
     respuesta_estatura = _respuesta_estatura(mensaje, historial)
@@ -871,7 +1113,7 @@ def generar_chat(mensaje: str, historial: list[dict[str, str]]) -> Iterator[str]
         return
 
     contexto = "\n---\n".join(chunks)
-    fuente = _fuente_sugerida(mensaje, historial)
+    fuente = _fuente_sugerida(mensaje, historial, contexto=contexto)
 
     respuesta_grabacion = _respuesta_grabacion_directa(mensaje, contexto)
     if respuesta_grabacion:
@@ -888,12 +1130,40 @@ def generar_chat(mensaje: str, historial: list[dict[str, str]]) -> Iterator[str]
         if fuente == "Configuracion local"
         else "No relevante para esta pregunta. No menciones modelos, Ollama, ChromaDB ni embeddings salvo que el usuario pregunte por configuracion."
     )
+    if modo_lectura_facil:
+        estado_tecnico = f"{estado_tecnico}\n\n{EASY_READ_INSTRUCTIONS}"
+    # Cuando la fuente es de conocimiento general o configuracion, el contexto
+    # de la grabacion no es relevante y puede contaminar la respuesta (por
+    # ejemplo, hacer que el modelo conteste "Lorenzo" para una pregunta sobre
+    # Patrick Mahomes). Lo sustituimos por un marcador explicito.
+    contexto_para_prompt = (
+        contexto
+        if fuente not in {"Conocimiento general local", "Configuracion local"}
+        else "(La pregunta no depende de la grabacion. Responde usando conocimiento general y deja claro que no proviene del audio indexado.)"
+    )
     prompt = prompt_chat(
-        contexto=contexto,
+        contexto=contexto_para_prompt,
         historial=_formatear_historial(historial),
         mensaje=mensaje,
         estado_tecnico=estado_tecnico,
         fuente_sugerida=fuente,
     )
-    respuesta = texto_con_prompt(prompt)
-    yield from _emitir_texto(_asegurar_formato_chat(respuesta, fuente))
+
+    # Streaming token a token para que la conexion no se caiga por timeout y
+    # el usuario vea progreso inmediato. Al final, si el formato no respeta el
+    # patron "Fuente: ... / Respuesta: ...", emitimos un REWRITE con la version
+    # normalizada.
+    buffer: list[str] = []
+    for token in stream_con_prompt(prompt):
+        buffer.append(token)
+        yield token
+
+    raw = "".join(buffer).strip()
+    if not raw:
+        return
+
+    formatted = _asegurar_formato_chat(raw, fuente)
+    if formatted.strip() == raw.strip():
+        return
+    yield "[[REWRITE]]"
+    yield formatted

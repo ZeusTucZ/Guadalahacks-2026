@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { Sidebar, type AppView } from './components/Sidebar'
 import { MindMapView } from './components/MindMapView'
+import { VoiceChatControls } from './components/VoiceChatControls'
 import { MemoryTimelinePage } from './pages/MemoryTimelinePage'
 import { RecordingsPage } from './pages/RecordingsPage'
 import { useMinutero, type ImportantDate } from './useMinutero'
@@ -58,6 +59,34 @@ export default function App() {
   const outputsRef = useRef<HTMLElement>(null)
   const questionsRef = useRef<HTMLElement>(null)
   const statusRef = useRef<HTMLElement>(null)
+
+  // Registramos los comandos de voz que requieren acciones a nivel de App
+  // (navegacion entre vistas, disparar generadores). El hook ya maneja los
+  // comandos locales de TTS (repite, para, mas rapido, etc.).
+  useEffect(() => {
+    m.registerNavigationHandler((command) => {
+      switch (command.type) {
+        case 'nav-dashboard':
+          setView('dashboard')
+          return true
+        case 'nav-recordings':
+          setView('recordings')
+          return true
+        case 'nav-timeline':
+          setView('timeline')
+          return true
+        case 'generate-summary':
+          m.generateSummary()
+          return true
+        case 'generate-map':
+          m.generateMap()
+          return true
+        default:
+          return false
+      }
+    })
+    return () => m.registerNavigationHandler(null)
+  }, [m])
 
   const localActive = m.ollamaOk && m.modelOk
   const canExpandPreview = m.preview.length > TRANSCRIPT_PREVIEW_LIMIT
@@ -385,6 +414,10 @@ export default function App() {
                     </article>
                   ))
                 )}
+              </div>
+
+              <div className="mb-3">
+                <VoiceChatControls minutero={m} />
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">

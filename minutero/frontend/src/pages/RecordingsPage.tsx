@@ -14,6 +14,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { MindMapView } from '../components/MindMapView'
+import { VoiceChatControls } from '../components/VoiceChatControls'
 import type { MinuteroController } from '../useMinutero'
 
 const LIVE_BARS = [
@@ -103,6 +104,26 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
           <div className="relative mt-10 w-full max-w-md">
             <LiveWaveform active={m.isRecording && !m.isPaused} />
           </div>
+
+          {m.isRecording && (
+            <div
+              className="relative mt-6 w-full max-w-2xl rounded-2xl border border-teal-500/30 bg-teal-500/5 px-4 py-3 text-sm leading-relaxed text-teal-100"
+              role="region"
+              aria-label="Subtítulos en vivo"
+              aria-live="polite"
+            >
+              <p className="mb-1 text-[10px] font-semibold tracking-[0.35em] text-teal-300">
+                SUBTÍTULOS EN VIVO
+              </p>
+              <p className="min-h-[2.5rem] whitespace-pre-wrap text-base font-medium">
+                {m.liveCaption || (
+                  <span className="italic text-teal-300/60">
+                    Esperando audio... los subtítulos aparecerán aquí en unos segundos.
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
 
           <button
             type="button"
@@ -287,6 +308,10 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
                   </article>
                 ))
               )}
+            </div>
+
+            <div className="mt-4">
+              <VoiceChatControls minutero={m} />
             </div>
 
             <div className="mt-4 flex gap-2">

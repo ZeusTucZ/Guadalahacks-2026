@@ -14,6 +14,9 @@ export default defineConfig({
     proxy: {
       '/estado': 'http://127.0.0.1:8000',
       '/indexar': 'http://127.0.0.1:8000',
+      '/caption': 'http://127.0.0.1:8000',
+      '/grabaciones': 'http://127.0.0.1:8000',
+      '/transcribir-chat': 'http://127.0.0.1:8000',
       '/resumir': 'http://127.0.0.1:8000',
       '/mapa': 'http://127.0.0.1:8000',
       '/preguntar': 'http://127.0.0.1:8000',
