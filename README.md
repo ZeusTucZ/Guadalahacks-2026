@@ -1,6 +1,6 @@
-# Minutero
+# Lux
 
-Minutero es un asistente local para convertir audio de reuniones, clases o charlas en conocimiento consultable: transcripcion, resumen ejecutivo, mapa mental y chat conversacional con RAG.
+Lux es un asistente local para convertir voz en memoria accesible: subtitulos en vivo, transcripcion, resumen ejecutivo, mapa mental y chat conversacional con RAG.
 
 El objetivo del proyecto es demostrar IA en el borde: el audio, los embeddings, la base vectorial y el LLM corren en la misma maquina del usuario, sin APIs externas de IA.
 
@@ -10,7 +10,7 @@ En reuniones, clases y conferencias se pierde informacion importante porque todo
 
 ## Solucion
 
-Minutero transforma una grabacion en una memoria local. La entrada puede ser un archivo de audio o una grabacion capturada desde el microfono del navegador:
+Lux transforma una grabacion en una memoria local. La entrada puede ser un archivo de audio o una grabacion capturada desde el microfono del navegador:
 
 ```text
 Audio
@@ -52,7 +52,7 @@ MINUTERO_VOICE_WHISPER_MODEL=medium uvicorn main:app --reload --port 8000
 
 Opciones de calidad/velocidad: `tiny` < `base` < `small` (por defecto) < `medium` < `large`. En Mac Apple Silicon, `small` corre rapido y mejora dramaticamente la precision con nombres propios y terminos tecnicos. Si tu maquina es lenta, baja a `base`.
 
-Para subtitulos en vivo, Minutero usa por defecto `MINUTERO_CAPTION_WHISPER_MODEL=base`.
+Para subtitulos en vivo, Lux usa por defecto `MINUTERO_CAPTION_WHISPER_MODEL=base`.
 `tiny` es mas rapido, pero confunde nombres y terminos tecnicos con mucha
 facilidad. Puedes reforzar el vocabulario esperado de una demo con:
 
@@ -60,8 +60,16 @@ facilidad. Puedes reforzar el vocabulario esperado de una demo con:
 MINUTERO_CAPTION_CONTEXT="Lorenzo Orrante, hackaton, LLM local" uvicorn main:app --reload --port 8000
 ```
 
-Los subtitulos no aparecen palabra por palabra. Se actualizan por bloques cada
-3-5 segundos para darle a Whisper suficiente audio.
+Los subtitulos no aparecen palabra por palabra. Se actualizan por bloques de
+5 segundos para darle a Whisper suficiente audio.
+
+Mejora de precision implementada: cada bloque de subtitulos envia al backend
+una ventana corta del texto ya transcrito. Whisper usa ese contexto en el
+`initial_prompt` para mantener continuidad entre bloques, nombres propios y
+terminos tecnicos. Ademas, el backend aplica correcciones locales de vocabulario
+para errores frecuentes de la demo, como "LLM local", "Tecnologico de
+Monterrey", "personas ciegas", "transcriben" y frases de accesibilidad. Todo
+sigue corriendo localmente.
 
 ## Requisitos del sistema
 
