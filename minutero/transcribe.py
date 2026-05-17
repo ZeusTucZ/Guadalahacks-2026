@@ -26,7 +26,7 @@ _WHISPER_TRANSCRIBE_LOCK = Lock()
 # errores como "Patrick Mahomes" -> "mis colmas" o "quarterback" -> "coredado".
 VOICE_INITIAL_PROMPT = (
     "Conversacion en espanol con preguntas cortas. "
-    "Nombre del usuario/proyecto: Lorenzo Orrante, Minutero, Guadalahacks. "
+    "Nombre del usuario/proyecto: Lorenzo Orrante, Lux, Guadalahacks. "
     "El usuario puede mencionar nombres propios en ingles: "
     "Patrick Mahomes, Lamar Jackson, Travis Kelce, Tom Brady, Aaron Rodgers, "
     "Kansas City Chiefs, Baltimore Ravens, Buffalo Bills, Dallas Cowboys, "
@@ -38,7 +38,7 @@ VOICE_INITIAL_PROMPT = (
 
 CAPTION_INITIAL_PROMPT = (
     "Transcripcion en vivo en espanol de una demo de accesibilidad y programacion. "
-    "Terminos esperados: Lorenzo Orrante, hackaton, Guadalahacks, Minutero, "
+    "Terminos esperados: Lorenzo Orrante, hackaton, Guadalahacks, Lux, "
     "LLM local, inteligencia artificial local, Whisper, Ollama, ChromaDB, RAG, "
     "Python, JavaScript, TypeScript, React, FastAPI, Tecnologico de Monterrey, "
     "personas sordas, personas ciegas, subtitulos en vivo, microfono, chat por voz, "
@@ -50,6 +50,8 @@ CAPTION_INITIAL_PROMPT = (
     "Sirve para personas sordas y ciegas. "
     "Puedo hablar con la IA y recibir respuesta con voz."
 )
+
+CAPTION_CONTEXT_CHARS = 420
 
 
 def limpiar_transcripcion(texto: str) -> str:
@@ -160,9 +162,13 @@ def corregir_caption(texto: str) -> str:
 
     reemplazos = [
         (r"\bha estado aprendiendo\b", "he estado aprendiendo"),
+        (r"\bse estudi[oó] en el Tecnol[oó]gico de Monterrey\b", "estudio en el Tecnológico de Monterrey"),
+        (r"\bestudi[oó] en el Tecnol[oó]gico de Monterrey\b", "estudio en el Tecnológico de Monterrey"),
         (r"\bjacat[oó]n\b", "hackaton"),
         (r"\bjaqueat[oó]n\b", "hackaton"),
         (r"\bhackat[oó]n\b", "hackaton"),
+        (r"\bcloud\s+noting\b", "note-taking"),
+        (r"\bcloud\s+notas\b", "notas"),
         (r"\bLL\s*me\s*local\b", "LLM local"),
         (r"\bLL\s*melo\s*cal\b", "LLM local"),
         (r"\bLL\s*melocal\b", "LLM local"),
@@ -172,8 +178,13 @@ def corregir_caption(texto: str) -> str:
         (r"\bTecnol[oó]gico de Monterrey\b", "Tecnológico de Monterrey"),
         (r"\bmi estrella hermano\b", "mis tres hermanos"),
         (r"\bpersonas siegas\b", "personas ciegas"),
+        (r"\bpersonas sielgas\b", "personas ciegas"),
+        (r"\bpersonas sordas o temas como de\b", "personas sordas"),
         (r"\bde manera locura\b", "de manera local"),
         (r"\bmi cr[oó]fono\b", "micrófono"),
+        (r"\btransdiven\b", "transcriben"),
+        (r"\btranscriben y lo\b", "transcriben y luego"),
+        (r"\bhabiendo su p[eé]talo\b", "haciéndolo lo más accesible posible"),
     ]
     for patron, reemplazo in reemplazos:
         limpio = re.sub(patron, reemplazo, limpio, flags=re.IGNORECASE)
@@ -228,9 +239,19 @@ def _nombre_modelo_caption() -> str:
     return os.getenv("MINUTERO_CAPTION_WHISPER_MODEL", "base")
 
 
-def _caption_initial_prompt() -> str:
+def _caption_initial_prompt(contexto_previo: str = "") -> str:
     extra = os.getenv("MINUTERO_CAPTION_CONTEXT", "").strip()
-    return f"{CAPTION_INITIAL_PROMPT} {extra}".strip()
+    contexto = re.sub(r"\s+", " ", contexto_previo).strip()
+    contexto = contexto[-CAPTION_CONTEXT_CHARS:]
+    partes = [CAPTION_INITIAL_PROMPT]
+    if extra:
+        partes.append(f"Vocabulario adicional esperado: {extra}.")
+    if contexto:
+        partes.append(
+            "Texto ya transcrito antes de este bloque, solo como contexto de continuidad: "
+            f"{contexto}. Corrige segun el audio actual si hay conflicto."
+        )
+    return " ".join(partes).strip()
 
 
 def _ejecutar_transcripcion_caption(model, ruta_audio: str, *, initial_prompt: str | None, beam_size: int):
@@ -314,7 +335,7 @@ def transcribir_voz_chat(ruta_audio: str) -> str:
     return texto_limpio
 
 
-def transcribir_caption(ruta_audio: str) -> str:
+def transcribir_caption(ruta_audio: str, contexto_previo: str = "") -> str:
     """Transcribe un chunk corto para captioning en vivo.
 
     Optimizado para equilibrio calidad/latencia: usa prompt de contexto y un
@@ -329,7 +350,7 @@ def transcribir_caption(ruta_audio: str) -> str:
         resultado = _ejecutar_transcripcion_caption(
             model,
             str(ruta),
-            initial_prompt=_caption_initial_prompt(),
+            initial_prompt=_caption_initial_prompt(contexto_previo),
             beam_size=3,
         )
     except RuntimeError as exc:

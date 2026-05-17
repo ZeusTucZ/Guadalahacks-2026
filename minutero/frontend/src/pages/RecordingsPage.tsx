@@ -47,29 +47,27 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex items-center justify-between px-6 py-5 md:px-10">
-        <span className="inline-flex items-center gap-2 rounded-full border border-teal-500/30 bg-teal-500/5 px-3 py-1.5 text-xs font-medium text-teal-400">
-          <Target className="h-3.5 w-3.5" />
-          Procesando localmente
-        </span>
+      <header className="flex flex-col gap-4 px-6 py-5 md:flex-row md:items-center md:justify-between md:px-10">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Lux</h1>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-zinc-500">
+            Memoria hablada local para subtítulos, chat por voz y respuestas con evidencia.
+          </p>
+        </div>
         <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-teal-500/30 bg-teal-500/5 px-3 py-1.5 text-xs font-medium text-teal-400">
+            <Target className="h-3.5 w-3.5" />
+            Local
+          </span>
           <span className="hidden rounded-full border border-zinc-800 px-3 py-1 text-xs text-zinc-500 md:inline-flex">
             {m.modelName || 'modelo local'}
           </span>
-          <button
-            type="button"
-            className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-800/80 hover:text-zinc-300"
-            aria-label="Modo sin nube"
-          >
+          <span className="rounded-lg border border-zinc-800 p-2 text-zinc-500" aria-label="Modo sin nube">
             <CloudOff className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-800/80 hover:text-zinc-300"
-            aria-label="Bloqueado"
-          >
+          </span>
+          <span className="rounded-lg border border-zinc-800 p-2 text-zinc-500" aria-label="Bloqueado">
             <Lock className="h-4 w-4" />
-          </button>
+          </span>
         </div>
       </header>
 
@@ -260,6 +258,17 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
               <div>
                 <h2 className="text-lg font-semibold text-white">Chat de la grabación</h2>
                 <p className="mt-1 text-xs text-zinc-500">Conserva el hilo y consulta el audio indexado.</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="rounded-md border border-teal-500/30 bg-teal-500/5 px-2 py-1 text-[10px] font-semibold tracking-wide text-teal-300">
+                    {m.chunkCount} chunks locales
+                  </span>
+                  <span className="rounded-md border border-zinc-700 px-2 py-1 text-[10px] font-semibold tracking-wide text-zinc-500">
+                    {m.modelName || 'modelo local'}
+                  </span>
+                  <span className="rounded-md border border-zinc-700 px-2 py-1 text-[10px] font-semibold tracking-wide text-zinc-500">
+                    sin nube
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
@@ -317,6 +326,39 @@ export function RecordingsPage({ minutero: m }: { minutero: MinuteroController }
               </button>
             </div>
           </section>
+        </section>
+
+        <section
+          className="mt-6 grid gap-3 md:grid-cols-3"
+          aria-label="Diferenciales de Lux"
+        >
+          <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-2 text-teal-300">
+              <CloudOff className="h-4 w-4" />
+              <h2 className="text-sm font-semibold">Privacidad local</h2>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+              Audio, embeddings, memoria y LLM corren en la laptop. No hay APIs externas de IA.
+            </p>
+          </article>
+          <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-2 text-[#c7b8ea]">
+              <AudioLines className="h-4 w-4" />
+              <h2 className="text-sm font-semibold">Accesibilidad multimodal</h2>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+              Subtítulos en vivo, chat por voz, respuesta hablada, comandos y modo lectura fácil.
+            </p>
+          </article>
+          <article className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="flex items-center gap-2 text-amber-300">
+              <Lock className="h-4 w-4" />
+              <h2 className="text-sm font-semibold">Cero infraestructura</h2>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+              Funciona sin cuenta, sin costo por token y sin depender de internet durante la demo.
+            </p>
+          </article>
         </section>
       </main>
     </div>

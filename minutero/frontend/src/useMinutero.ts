@@ -155,7 +155,7 @@ function importantDateFromDate(date: Date, raw: string): ImportantDate {
     day: month?.short ?? 'FECH',
     num: day,
     title: cleanDateTitle(raw),
-    desc: 'Detectada en Minutero',
+    desc: 'Detectada en Lux',
   }
 }
 
@@ -400,7 +400,8 @@ const VOICE_CHAT_NOISE_MARGIN = 0.012
 // Tiempo para muestrear el ruido ambiental al inicio.
 const VOICE_CHAT_NOISE_CALIBRATION_MS = 350
 const RECORDING_CHUNK_MS = 1000
-const LIVE_CAPTION_INTERVAL_MS = 3500
+const LIVE_CAPTION_INTERVAL_MS = 5000
+const LIVE_CAPTION_CONTEXT_CHARS = 420
 
 function isVoiceChatSupported() {
   return (
@@ -1127,6 +1128,7 @@ export function useMinutero() {
       })
       const form = new FormData()
       form.append('audio', file)
+      form.append('contexto', liveCaptionTextRef.current.slice(-LIVE_CAPTION_CONTEXT_CHARS))
 
       const controller = new AbortController()
       liveCaptionAbortRef.current = controller

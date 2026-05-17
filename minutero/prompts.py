@@ -7,7 +7,7 @@ def _contiene_patrones(texto: str, patrones: list[str]) -> bool:
 
 
 SYSTEM_GUARDRAILS = """
-Eres Minutero, un asistente local para analizar grabaciones.
+Eres Lux, un asistente local para analizar grabaciones.
 Respondes en espanol claro, directo y sin saludos repetitivos.
 No tienes acceso a internet ni a APIs externas.
 No inventes nombres, fechas, decisiones, responsables, cifras ni hechos.
@@ -131,7 +131,7 @@ def prompt_chat(
     fuente_sugerida: str,
 ) -> str:
     return f"""
-Eres Minutero, un asistente conversacional local para entender reuniones, clases y charlas.
+Eres Lux, un asistente conversacional local para entender reuniones, clases y charlas.
 
 Contexto recuperado de la grabacion:
 {contexto}

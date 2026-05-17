@@ -52,7 +52,7 @@ function scrollToRef(ref: RefObject<HTMLElement | null>) {
 }
 
 export default function App() {
-  const [view, setView] = useState<AppView>('dashboard')
+  const [view, setView] = useState<AppView>('recordings')
   const [previewExpanded, setPreviewExpanded] = useState(false)
   const m = useMinutero()
   const uploadRef = useRef<HTMLElement>(null)
@@ -67,7 +67,7 @@ export default function App() {
     m.registerNavigationHandler((command) => {
       switch (command.type) {
         case 'nav-dashboard':
-          setView('dashboard')
+          setView('recordings')
           return true
         case 'nav-recordings':
           setView('recordings')

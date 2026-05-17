@@ -97,7 +97,7 @@ def _formatear_historial(historial: list[dict[str, str]]) -> str:
 
     etiquetas = {
         "user": "Usuario (evidencia del chat)",
-        "assistant": "Minutero (respuesta previa; no usar como evidencia factual)",
+        "assistant": "Lux (respuesta previa; no usar como evidencia factual)",
     }
     return "\n".join(
         f"{etiquetas[turno['role']]}: {turno['content']}" for turno in historial_limpio
@@ -177,7 +177,7 @@ def _respuesta_configuracion(mensaje: str) -> str | None:
         return (
             "Fuente: Configuracion local\n"
             "Respuesta: El LLM local activo es "
-            f"{LLM_MODEL}. Si no se define MINUTERO_LLM_MODEL, Minutero usa el modelo "
+            f"{LLM_MODEL}. Si no se define MINUTERO_LLM_MODEL, Lux usa el modelo "
             "personalizado minutero, basado en gemma4:e4b. Para vectorizacion usamos "
             f"{EMBEDDING_MODEL} en Ollama."
         )
@@ -192,7 +192,7 @@ def _respuesta_definicion_general(mensaje: str) -> str | None:
         return (
             "Fuente: Conocimiento general local\n"
             "Respuesta: Un LLM es un modelo grande de lenguaje, es decir, un modelo de "
-            "inteligencia artificial entrenado para entender y generar texto. En Minutero, "
+            "inteligencia artificial entrenado para entender y generar texto. En Lux, "
             "el LLM local se usa para resumir, responder preguntas y conversar sobre el "
             "contenido transcrito."
         )

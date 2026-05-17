@@ -2,7 +2,6 @@ import {
   Bot,
   ChevronDown,
   Clock3,
-  EyeOff,
   Folder,
   Globe,
   Inbox,
@@ -106,7 +105,7 @@ function ThumbnailWaveform({ accent }: { accent: 'purple' | 'teal' }) {
 
 function MessagePreview({ message }: { message: ChatMessage }) {
   const Icon = message.role === 'user' ? User : Bot
-  const label = message.role === 'user' ? 'Tú' : 'Minutero'
+  const label = message.role === 'user' ? 'Tú' : 'Lux'
 
   return (
     <li className="flex min-w-0 items-start gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/35 px-3 py-2">
@@ -210,12 +209,9 @@ export function MemoryTimelinePage({
             <Globe className="h-3 w-3" />
             PROCESAMIENTO EN DISPOSITIVO
           </span>
-          <button type="button" className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
-            <EyeOff className="h-4 w-4" />
-          </button>
-          <button type="button" className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+          <span className="rounded-lg border border-zinc-800 p-2 text-zinc-500" aria-label="Memoria local bloqueada">
             <Lock className="h-4 w-4" />
-          </button>
+          </span>
           <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#c7b8ea] to-violet-600" />
         </div>
       </header>
@@ -247,7 +243,7 @@ export function MemoryTimelinePage({
                 <Inbox className="h-6 w-6 text-zinc-600" />
                 <h3 className="mt-4 text-lg font-semibold text-white">Sin chats guardados</h3>
                 <p className="mt-2 max-w-md text-sm leading-relaxed text-zinc-500">
-                  Cuando converses con Minutero, los hilos aparecerán aquí con sus últimos mensajes.
+                  Cuando converses con Lux, los hilos aparecerán aquí con sus últimos mensajes.
                 </p>
               </article>
             </section>
@@ -292,13 +288,10 @@ function FilterButton({
   hasChevron?: boolean
 }) {
   return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-4 py-2 text-xs font-medium text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200"
-    >
+    <span className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-4 py-2 text-xs font-medium text-zinc-400">
       {Icon && <Icon className="h-3.5 w-3.5" />}
       {label}
       {hasChevron && <ChevronDown className="h-3 w-3 opacity-60" />}
-    </button>
+    </span>
   )
 }

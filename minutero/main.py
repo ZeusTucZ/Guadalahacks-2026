@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, File, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -53,7 +53,7 @@ class ChatRequest(BaseModel):
     historial: list[ChatTurn] = Field(default_factory=list)
     modo_lectura_facil: bool = False
 
-app = FastAPI(title="Minutero", version="0.1.0")
+app = FastAPI(title="Lux", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -226,7 +226,10 @@ def borrar_todas_grabaciones() -> JSONResponse:
 
 
 @app.post("/caption")
-def caption_audio(audio: UploadFile = File(...)) -> JSONResponse:
+def caption_audio(
+    audio: UploadFile = File(...),
+    contexto: str = Form("", description="Texto previo acumulado para mejorar continuidad"),
+) -> JSONResponse:
     """Transcribe un chunk corto para captioning en vivo durante grabacion."""
     TEMP_DIR.mkdir(exist_ok=True)
     nombre_seguro = Path(audio.filename or "caption.webm").name
@@ -235,7 +238,7 @@ def caption_audio(audio: UploadFile = File(...)) -> JSONResponse:
     try:
         with ruta_audio.open("wb") as destino:
             shutil.copyfileobj(audio.file, destino)
-        texto = transcribir_caption(str(ruta_audio))
+        texto = transcribir_caption(str(ruta_audio), contexto_previo=contexto)
         return JSONResponse({"ok": True, "texto": texto})
     except Exception as exc:
         return JSONResponse(
