@@ -26,6 +26,15 @@ LLM_TOP_P = float(os.getenv("MINUTERO_TOP_P", "0.85"))
 TOP_K = 3
 MAX_CHAT_TURNS = 8
 MAX_CHAT_CHARS = 1200
+OPT_CHAT_MESSAGES = 6
+OPT_USER_CHARS = 600
+OPT_ASSISTANT_CHARS = 300
+TASK_NUM_PREDICT = {
+    "/chat": 300,
+    "/preguntar": 220,
+    "/resumir": 450,
+    "/calentar": 2,
+}
 
 
 def approx_tokens(text: str) -> int:
@@ -57,6 +66,14 @@ def log_metric(event_name: str, data: dict[str, Any]) -> None:
     print(f"[TOKEN_BASELINE][{event_name}] {fields}", flush=True)
 
 
+def log_optimized(event_name: str, data: dict[str, Any]) -> None:
+    payload = {"timestamp": datetime.now(timezone.utc).isoformat(), **data}
+    fields = " ".join(
+        f"{_metric_key(key)}={_metric_value(value)}" for key, value in payload.items()
+    )
+    print(f"[TOKEN_OPTIMIZED][{event_name}] {fields}", flush=True)
+
+
 @dataclass
 class ChatMemory:
     nombre: str | None = None
@@ -73,6 +90,10 @@ def _opciones_generacion(num_predict: int | None = None) -> dict[str, float | in
     }
 
 
+def _num_predict_para_task(task: str) -> int | None:
+    return TASK_NUM_PREDICT.get(task)
+
+
 def _embedding(texto: str) -> list[float]:
     import ollama
 
@@ -85,9 +106,10 @@ def _embedding(texto: str) -> list[float]:
     return embedding
 
 
-def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
+def recuperar_chunks(pregunta: str, task: str = "RAG", top_k: int | None = None) -> list[str]:
     cliente = _cliente_chroma()
     coleccion = cliente.get_or_create_collection(name=COLLECTION_NAME)
+    effective_top_k = top_k or TOP_K
 
     total = coleccion.count()
     if total == 0:
@@ -97,13 +119,25 @@ def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
                 "task": task,
                 "pregunta_chars": len(pregunta),
                 "pregunta_tokens_aprox": approx_tokens(pregunta),
-                "top_k": TOP_K,
+                "top_k": effective_top_k,
                 "chunks": 0,
                 "rag_chars": 0,
                 "rag_tokens_aprox": 0,
                 "embedding_ms": 0,
                 "search_ms": 0,
                 "collection_chunks": 0,
+            },
+        )
+        log_optimized(
+            "RAG",
+            {
+                "task": task,
+                "top_k": effective_top_k,
+                "chunks_recuperados": 0,
+                "rag_chars": 0,
+                "rag_tokens_aprox": 0,
+                "embedding_ms": 0,
+                "search_ms": 0,
             },
         )
         return []
@@ -115,7 +149,7 @@ def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
     search_start = time.perf_counter()
     resultado = coleccion.query(
         query_embeddings=[pregunta_embedding],
-        n_results=min(TOP_K, total),
+        n_results=min(effective_top_k, total),
         include=["documents", "distances"],
     )
     search_ms = (time.perf_counter() - search_start) * 1000
@@ -131,8 +165,8 @@ def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
             "task": task,
             "pregunta_chars": len(pregunta),
             "pregunta_tokens_aprox": approx_tokens(pregunta),
-            "top_k": TOP_K,
-            "n_results": min(TOP_K, total),
+            "top_k": effective_top_k,
+            "n_results": min(effective_top_k, total),
             "chunks": len(chunks),
             "rag_chars": len(rag_text),
             "rag_tokens_aprox": approx_tokens(rag_text),
@@ -142,10 +176,22 @@ def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
             "distances": [round(float(value), 4) for value in distance_values],
         },
     )
+    log_optimized(
+        "RAG",
+        {
+            "task": task,
+            "top_k": effective_top_k,
+            "chunks_recuperados": len(chunks),
+            "rag_chars": len(rag_text),
+            "rag_tokens_aprox": approx_tokens(rag_text),
+            "embedding_ms": round(embedding_ms, 2),
+            "search_ms": round(search_ms, 2),
+        },
+    )
     return chunks
 
 
-def _normalizar_historial(historial: list[dict[str, str]]) -> list[dict[str, str]]:
+def _normalizar_historial_baseline(historial: list[dict[str, str]]) -> list[dict[str, str]]:
     historial_limpio: list[dict[str, str]] = []
 
     for turno in historial[-MAX_CHAT_TURNS:]:
@@ -157,6 +203,25 @@ def _normalizar_historial(historial: list[dict[str, str]]) -> list[dict[str, str
             {
                 "role": rol,
                 "content": contenido[:MAX_CHAT_CHARS],
+            }
+        )
+
+    return historial_limpio
+
+
+def _normalizar_historial(historial: list[dict[str, str]]) -> list[dict[str, str]]:
+    historial_limpio: list[dict[str, str]] = []
+
+    for turno in historial[-OPT_CHAT_MESSAGES:]:
+        rol = str(turno.get("role", "")).strip().lower()
+        contenido = str(turno.get("content", "")).strip()
+        if rol not in {"user", "assistant"} or not contenido:
+            continue
+        limite = OPT_USER_CHARS if rol == "user" else OPT_ASSISTANT_CHARS
+        historial_limpio.append(
+            {
+                "role": rol,
+                "content": contenido[:limite],
             }
         )
 
@@ -192,6 +257,60 @@ def _normalizar_texto(texto: str) -> str:
         for caracter in normalizado
         if unicodedata.category(caracter) != "Mn"
     ).strip()
+
+
+def _texto_rag(chunks: list[str]) -> str:
+    return "\n---\n".join(chunks)
+
+
+def _tokens_dedup(texto: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]{4,}", _normalizar_texto(texto)))
+
+
+def _deduplicar_chunks_rag(chunks: list[str], task: str) -> list[str]:
+    """Deduplicacion conservadora para no mandar overlap repetido al prompt."""
+    before_text = _texto_rag(chunks)
+    deduped: list[str] = []
+    normalized_kept: list[str] = []
+    token_sets: list[set[str]] = []
+
+    for chunk in chunks:
+        normalized = re.sub(r"\s+", " ", _normalizar_texto(chunk)).strip()
+        words = _tokens_dedup(chunk)
+        duplicate = False
+
+        for kept_normalized, kept_words in zip(normalized_kept, token_sets):
+            contained = (
+                len(normalized) > 80
+                and len(kept_normalized) > 80
+                and (normalized in kept_normalized or kept_normalized in normalized)
+            )
+            union = words | kept_words
+            similarity = (len(words & kept_words) / len(union)) if union else 0.0
+            too_similar = len(words) >= 20 and len(kept_words) >= 20 and similarity >= 0.92
+            if contained or too_similar:
+                duplicate = True
+                break
+
+        if not duplicate:
+            deduped.append(chunk)
+            normalized_kept.append(normalized)
+            token_sets.append(words)
+
+    after_text = _texto_rag(deduped)
+    log_optimized(
+        "RAG_DEDUP",
+        {
+            "task": task,
+            "chunks_before": len(chunks),
+            "chunks_after": len(deduped),
+            "chars_before": len(before_text),
+            "chars_after": len(after_text),
+            "tokens_before_aprox": approx_tokens(before_text),
+            "tokens_after_aprox": approx_tokens(after_text),
+        },
+    )
+    return deduped
 
 
 def _estado_tecnico() -> str:
@@ -862,10 +981,14 @@ def _emitir_texto(texto: str) -> Iterator[str]:
     yield texto
 
 
-def stream_con_prompt(prompt: str, task: str = "LLM") -> Iterator[str]:
+def stream_con_prompt(
+    prompt: str,
+    task: str = "LLM",
+    num_predict: int | None = None,
+) -> Iterator[str]:
     import ollama
 
-    opciones = _opciones_generacion()
+    opciones = _opciones_generacion(num_predict or _num_predict_para_task(task))
     prompt_total = f"{SYSTEM_GUARDRAILS}\n{prompt}"
     started_at = time.perf_counter()
     first_token_at: float | None = None
@@ -881,6 +1004,20 @@ def stream_con_prompt(prompt: str, task: str = "LLM") -> Iterator[str]:
             "prompt_tokens_aprox": approx_tokens(prompt_total),
             "system_chars": len(SYSTEM_GUARDRAILS),
             "user_prompt_chars": len(prompt),
+            "num_ctx": opciones["num_ctx"],
+            "num_predict": opciones["num_predict"],
+            "temperature": opciones["temperature"],
+            "top_p": opciones["top_p"],
+            "keep_alive": LLM_KEEP_ALIVE,
+        },
+    )
+    log_optimized(
+        "LLM_START",
+        {
+            "task": task,
+            "model": LLM_MODEL,
+            "prompt_chars": len(prompt_total),
+            "prompt_tokens_aprox": approx_tokens(prompt_total),
             "num_ctx": opciones["num_ctx"],
             "num_predict": opciones["num_predict"],
             "temperature": opciones["temperature"],
@@ -926,12 +1063,41 @@ def stream_con_prompt(prompt: str, task: str = "LLM") -> Iterator[str]:
                 "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
             },
         )
+        log_optimized(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": round((first_token_at - started_at) * 1000, 2)
+                if first_token_at
+                else None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
         logged_end = True
         raise
     finally:
         if not logged_end:
             output = "".join(output_parts)
             log_metric(
+                "LLM_END",
+                {
+                    "task": task,
+                    "model": LLM_MODEL,
+                    "status": "ok",
+                    "output_chars": len(output),
+                    "output_tokens_aprox": approx_tokens(output),
+                    "ttft_ms": round((first_token_at - started_at) * 1000, 2)
+                    if first_token_at
+                    else None,
+                    "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
+            )
+            log_optimized(
                 "LLM_END",
                 {
                     "task": task,
@@ -954,7 +1120,7 @@ def texto_con_prompt(
 ) -> str:
     import ollama
 
-    opciones = _opciones_generacion(num_predict=num_predict)
+    opciones = _opciones_generacion(num_predict=num_predict or _num_predict_para_task(task))
     prompt_total = f"{SYSTEM_GUARDRAILS}\n{prompt}"
     started_at = time.perf_counter()
     log_metric(
@@ -966,6 +1132,20 @@ def texto_con_prompt(
             "prompt_tokens_aprox": approx_tokens(prompt_total),
             "system_chars": len(SYSTEM_GUARDRAILS),
             "user_prompt_chars": len(prompt),
+            "num_ctx": opciones["num_ctx"],
+            "num_predict": opciones["num_predict"],
+            "temperature": opciones["temperature"],
+            "top_p": opciones["top_p"],
+            "keep_alive": LLM_KEEP_ALIVE,
+        },
+    )
+    log_optimized(
+        "LLM_START",
+        {
+            "task": task,
+            "model": LLM_MODEL,
+            "prompt_chars": len(prompt_total),
+            "prompt_tokens_aprox": approx_tokens(prompt_total),
             "num_ctx": opciones["num_ctx"],
             "num_predict": opciones["num_predict"],
             "temperature": opciones["temperature"],
@@ -998,9 +1178,34 @@ def texto_con_prompt(
                 "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
             },
         )
+        log_optimized(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "ok",
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
         return output
     except Exception as exc:
         log_metric(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": 0,
+                "output_tokens_aprox": 0,
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        log_optimized(
             "LLM_END",
             {
                 "task": task,
@@ -1245,7 +1450,7 @@ def calentar_modelo() -> None:
         import ollama
 
         prompt = "Responde solo: ok"
-        opciones = _opciones_generacion(num_predict=2)
+        opciones = _opciones_generacion(num_predict=TASK_NUM_PREDICT["/calentar"])
         started_at = time.perf_counter()
         log_metric(
             "LLM_START",
@@ -1263,6 +1468,20 @@ def calentar_modelo() -> None:
                 "keep_alive": LLM_KEEP_ALIVE,
             },
         )
+        log_optimized(
+            "LLM_START",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "prompt_chars": len(prompt),
+                "prompt_tokens_aprox": approx_tokens(prompt),
+                "num_ctx": opciones["num_ctx"],
+                "num_predict": opciones["num_predict"],
+                "temperature": opciones["temperature"],
+                "top_p": opciones["top_p"],
+                "keep_alive": LLM_KEEP_ALIVE,
+            },
+        )
         respuesta = ollama.chat(
             model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
@@ -1272,6 +1491,18 @@ def calentar_modelo() -> None:
         )
         output = str(respuesta.get("message", {}).get("content", "")).strip()
         log_metric(
+            "LLM_END",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "status": "ok",
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        log_optimized(
             "LLM_END",
             {
                 "task": "/calentar",
@@ -1300,16 +1531,32 @@ def calentar_modelo() -> None:
                 else 0,
             },
         )
+        log_optimized(
+            "LLM_END",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": 0,
+                "output_tokens_aprox": 0,
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2)
+                if "started_at" in locals()
+                else 0,
+            },
+        )
         print(f"No se pudo calentar el modelo {LLM_MODEL}: {exc}")
 
 
 def generar_respuesta(pregunta: str) -> Iterator[str]:
-    chunks = recuperar_chunks(pregunta, task="/preguntar")
+    chunks = recuperar_chunks(pregunta, task="/preguntar", top_k=3)
+    chunks = _deduplicar_chunks_rag(chunks, task="/preguntar")
     if not chunks:
         yield "No encontrado en la grabacion."
         return
 
-    contexto = "\n---\n".join(chunks)
+    contexto = _texto_rag(chunks)
     prompt = prompt_pregunta(contexto, pregunta)
     yield from stream_con_prompt(prompt, task="/preguntar")
 
@@ -1330,19 +1577,41 @@ def generar_chat(
     historial: list[dict[str, str]],
     modo_lectura_facil: bool = False,
 ) -> Iterator[str]:
+    historial_baseline = _normalizar_historial_baseline(historial)
     historial_limpio = _normalizar_historial(historial)
+    historial_baseline_texto = "\n".join(turno["content"] for turno in historial_baseline)
     historial_texto = "\n".join(turno["content"] for turno in historial_limpio)
+    baseline_chars = len(historial_baseline_texto)
+    optimized_chars = len(historial_texto)
     log_metric(
+        "CHAT_HISTORY",
+        {
+            "task": "/chat",
+            "messages": len(historial_baseline),
+            "raw_messages": len(historial),
+            "history_chars": baseline_chars,
+            "history_tokens_aprox": approx_tokens(historial_baseline_texto),
+            "user_msg_chars": len(mensaje),
+            "user_msg_tokens_aprox": approx_tokens(mensaje),
+            "modo_lectura_facil": modo_lectura_facil,
+        },
+    )
+    log_optimized(
         "CHAT_HISTORY",
         {
             "task": "/chat",
             "messages": len(historial_limpio),
             "raw_messages": len(historial),
-            "history_chars": len(historial_texto),
+            "history_chars": optimized_chars,
             "history_tokens_aprox": approx_tokens(historial_texto),
             "user_msg_chars": len(mensaje),
             "user_msg_tokens_aprox": approx_tokens(mensaje),
-            "modo_lectura_facil": modo_lectura_facil,
+            "reduced_chars": max(0, baseline_chars - optimized_chars),
+            "reduced_tokens_aprox": max(
+                0,
+                approx_tokens(historial_baseline_texto) - approx_tokens(historial_texto),
+            ),
+            "baseline_messages": len(historial_baseline),
         },
     )
 
@@ -1372,7 +1641,8 @@ def generar_chat(
         return
 
     consulta = _consulta_para_retrieval(mensaje, historial)
-    chunks = recuperar_chunks(consulta or mensaje, task="/chat")
+    chunks = recuperar_chunks(consulta or mensaje, task="/chat", top_k=2)
+    chunks = _deduplicar_chunks_rag(chunks, task="/chat")
     if not chunks:
         yield (
             "Fuente: No encontrado\n"
@@ -1381,7 +1651,7 @@ def generar_chat(
         )
         return
 
-    contexto = "\n---\n".join(chunks)
+    contexto = _texto_rag(chunks)
     fuente = _fuente_sugerida(mensaje, historial, contexto=contexto)
 
     respuesta_grabacion = _respuesta_grabacion_directa(mensaje, contexto)

@@ -78,6 +78,11 @@ function isNetworkDependentMic(label: string) {
 const DEFAULT_TRANSCRIPT_PREVIEW = 'La vista previa de la transcripción aparecerá aquí.'
 const MAX_CHAT_SESSIONS = 24
 const MAX_CHAT_MESSAGES = 80
+const BASELINE_CHAT_HISTORY_MESSAGES = 8
+const BASELINE_CHAT_HISTORY_CHARS = 1200
+const OPT_CHAT_HISTORY_MESSAGES = 6
+const OPT_USER_HISTORY_CHARS = 600
+const OPT_ASSISTANT_HISTORY_CHARS = 300
 
 function formatBytes(bytes: number) {
   if (!bytes) return '0 B'
@@ -88,6 +93,10 @@ function formatBytes(bytes: number) {
 
 function approxTokens(text: string) {
   return Math.floor((text || '').length / 4)
+}
+
+function optimizedHistoryLimit(role: ChatRole) {
+  return role === 'user' ? OPT_USER_HISTORY_CHARS : OPT_ASSISTANT_HISTORY_CHARS
 }
 
 async function readJsonResponse(response: Response, fallbackMessage: string) {
@@ -1736,21 +1745,46 @@ export function useMinutero() {
 
       if (!activeChatId) setActiveChatId(sessionId)
 
-      const historyForRequest = baseConversation.slice(-8).map((turn) => ({
+      const baselineHistoryForRequest = baseConversation
+        .slice(-BASELINE_CHAT_HISTORY_MESSAGES)
+        .map((turn) => ({
+          role: turn.role,
+          content: turn.content.slice(0, BASELINE_CHAT_HISTORY_CHARS),
+        }))
+
+      const historyForRequest = baseConversation.slice(-OPT_CHAT_HISTORY_MESSAGES).map((turn) => ({
         role: turn.role,
-        content: turn.content.slice(0, 1200),
+        content: turn.content.slice(0, optimizedHistoryLimit(turn.role)),
       }))
+      const baselineHistoryChars = baselineHistoryForRequest.reduce(
+        (total, turn) => total + turn.content.length,
+        0,
+      )
       const historyChars = historyForRequest.reduce(
         (total, turn) => total + turn.content.length,
         0,
       )
       console.info(
         '[TOKEN_BASELINE][CHAT_HISTORY]',
+        `frontend_messages=${baselineHistoryForRequest.length}`,
+        `frontend_history_chars=${baselineHistoryChars}`,
+        `frontend_history_tokens~=${approxTokens(baselineHistoryForRequest.map((turn) => turn.content).join(''))}`,
+        `frontend_user_msg_chars=${cleanMessage.length}`,
+        `frontend_user_msg_tokens~=${approxTokens(cleanMessage)}`,
+      )
+      console.info(
+        '[TOKEN_OPTIMIZED][CHAT_HISTORY]',
         `frontend_messages=${historyForRequest.length}`,
         `frontend_history_chars=${historyChars}`,
         `frontend_history_tokens~=${approxTokens(historyForRequest.map((turn) => turn.content).join(''))}`,
         `frontend_user_msg_chars=${cleanMessage.length}`,
         `frontend_user_msg_tokens~=${approxTokens(cleanMessage)}`,
+        `frontend_reduced_chars=${Math.max(0, baselineHistoryChars - historyChars)}`,
+        `frontend_reduced_tokens~=${Math.max(
+          0,
+          approxTokens(baselineHistoryForRequest.map((turn) => turn.content).join('')) -
+            approxTokens(historyForRequest.map((turn) => turn.content).join('')),
+        )}`,
       )
 
       setQuestion('')
