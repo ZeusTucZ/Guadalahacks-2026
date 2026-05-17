@@ -57,6 +57,10 @@ Analisis automatico de evidencia:
 
 Genera un resumen ejecutivo fiel al contexto.
 
+Usa exclusivamente el texto dentro de "Contexto de la reunion". No uses memoria
+de grabaciones anteriores, conversaciones previas ni conocimiento general para
+completar el resumen.
+
 Formato obligatorio:
 
 Resumen:
@@ -82,6 +86,9 @@ Pendientes:
 - Nunca escribas "quien -> que" como placeholder o ejemplo.
 
 Reglas:
+- Si el contexto solo dice "Hola soy Memo y estoy en la escuela", el resumen
+  debe limitarse a Memo y la escuela. No menciones a Lorenzo, edad, Tecnologico
+  de Monterrey, hackaton ni LLM local salvo que aparezcan en este contexto.
 - No inventes informacion que no este en el contexto.
 - No agregues industrias, tecnologias, equipos, fechas, objetivos ni recomendaciones si no aparecen en el contexto.
 - No conviertas posibilidades en decisiones.

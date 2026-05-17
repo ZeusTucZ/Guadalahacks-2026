@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,18 @@ try:
         limpiar_coleccion,
         listar_grabaciones,
         obtener_chunks,
+        obtener_chunks_ultima_grabacion,
     )
-    from .query import LLM_MODEL, calentar_modelo, generar_chat, generar_mapa_seguro, generar_respuesta, generar_resumen_seguro
+    from .query import (
+        LLM_MODEL,
+        approx_tokens,
+        calentar_modelo,
+        generar_chat,
+        generar_mapa_seguro,
+        generar_respuesta,
+        generar_resumen_seguro,
+        log_metric,
+    )
     from .transcribe import transcribir, transcribir_caption, transcribir_voz_chat
 except ImportError:
     from chunk import chunkear
@@ -33,8 +44,18 @@ except ImportError:
         limpiar_coleccion,
         listar_grabaciones,
         obtener_chunks,
+        obtener_chunks_ultima_grabacion,
     )
-    from query import LLM_MODEL, calentar_modelo, generar_chat, generar_mapa_seguro, generar_respuesta, generar_resumen_seguro
+    from query import (
+        LLM_MODEL,
+        approx_tokens,
+        calentar_modelo,
+        generar_chat,
+        generar_mapa_seguro,
+        generar_respuesta,
+        generar_resumen_seguro,
+        log_metric,
+    )
     from transcribe import transcribir, transcribir_caption, transcribir_voz_chat
 
 
@@ -144,7 +165,7 @@ def _stream_texto(texto: str) -> Iterator[str]:
 
 def _contexto_general(limit: int = 5) -> str:
     try:
-        chunks = obtener_chunks(limit=limit)
+        chunks = obtener_chunks_ultima_grabacion(limit=limit)
     except Exception:
         return ""
     return "\n---\n".join(chunks)
@@ -156,23 +177,70 @@ def indexar_audio(
     audio: UploadFile = File(...),
     reemplazar: bool = Query(False, description="Si true, borra toda la memoria previa"),
 ) -> JSONResponse:
+    started_at = time.perf_counter()
     TEMP_DIR.mkdir(exist_ok=True)
     nombre_seguro = Path(audio.filename or "audio").name
     ruta_audio = TEMP_DIR / f"index-{uuid4().hex}-{nombre_seguro}"
+    log_metric(
+        "INDEX",
+        {
+            "endpoint": "/indexar",
+            "phase": "start",
+            "audio_name": nombre_seguro,
+            "reemplazar": reemplazar,
+        },
+    )
 
     try:
         with ruta_audio.open("wb") as destino:
             shutil.copyfileobj(audio.file, destino)
 
+        transcribe_start = time.perf_counter()
         texto = transcribir(str(ruta_audio))
+        transcripcion_ms = (time.perf_counter() - transcribe_start) * 1000
         if not texto.strip():
+            log_metric(
+                "INDEX",
+                {
+                    "endpoint": "/indexar",
+                    "phase": "end",
+                    "status": "no_voice",
+                    "audio_name": nombre_seguro,
+                    "transcripcion_ms": round(transcripcion_ms, 2),
+                    "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "chunks": 0,
+                    "transcript_chars": 0,
+                    "transcript_tokens_aprox": 0,
+                    "avg_chunk_chars": 0,
+                },
+            )
             return JSONResponse(
                 status_code=422,
                 content={"ok": False, "error": "No se detecto voz clara en el audio."},
             )
 
         chunks = chunkear(texto)
+        transcript_chars = len(texto)
+        avg_chunk_chars = round(
+            sum(len(chunk) for chunk in chunks) / len(chunks),
+            2,
+        ) if chunks else 0
         if not chunks:
+            log_metric(
+                "INDEX",
+                {
+                    "endpoint": "/indexar",
+                    "phase": "end",
+                    "status": "no_chunks",
+                    "audio_name": nombre_seguro,
+                    "transcripcion_ms": round(transcripcion_ms, 2),
+                    "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "chunks": 0,
+                    "transcript_chars": transcript_chars,
+                    "transcript_tokens_aprox": approx_tokens(texto),
+                    "avg_chunk_chars": 0,
+                },
+            )
             return JSONResponse(
                 status_code=422,
                 content={"ok": False, "error": "La transcripcion no produjo fragmentos indexables."},
@@ -185,6 +253,23 @@ def indexar_audio(
         audio_id = uuid4().hex
         total = indexar(chunks, audio_id=audio_id, audio_name=nombre_seguro)
         background_tasks.add_task(calentar_modelo)
+        log_metric(
+            "INDEX",
+            {
+                "endpoint": "/indexar",
+                "phase": "end",
+                "status": "ok",
+                "audio_name": nombre_seguro,
+                "audio_id": audio_id,
+                "transcripcion_ms": round(transcripcion_ms, 2),
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "chunks": len(chunks),
+                "indexed_chunks": total,
+                "transcript_chars": transcript_chars,
+                "transcript_tokens_aprox": approx_tokens(texto),
+                "avg_chunk_chars": avg_chunk_chars,
+            },
+        )
 
         return JSONResponse(
             {
@@ -196,6 +281,17 @@ def indexar_audio(
             }
         )
     except Exception as exc:
+        log_metric(
+            "INDEX",
+            {
+                "endpoint": "/indexar",
+                "phase": "end",
+                "status": "error",
+                "audio_name": nombre_seguro,
+                "error": type(exc).__name__,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(exc)},
@@ -231,16 +327,55 @@ def caption_audio(
     contexto: str = Form("", description="Texto previo acumulado para mejorar continuidad"),
 ) -> JSONResponse:
     """Transcribe un chunk corto para captioning en vivo durante grabacion."""
+    started_at = time.perf_counter()
     TEMP_DIR.mkdir(exist_ok=True)
     nombre_seguro = Path(audio.filename or "caption.webm").name
     ruta_audio = TEMP_DIR / f"caption-{uuid4().hex}-{nombre_seguro}"
+    log_metric(
+        "WHISPER_ONLY",
+        {
+            "endpoint": "/caption",
+            "phase": "start",
+            "audio_name": nombre_seguro,
+            "context_chars": len(contexto),
+            "context_tokens_aprox": approx_tokens(contexto),
+            "uses_llm_tokens": False,
+        },
+    )
 
     try:
         with ruta_audio.open("wb") as destino:
             shutil.copyfileobj(audio.file, destino)
+        whisper_start = time.perf_counter()
         texto = transcribir_caption(str(ruta_audio), contexto_previo=contexto)
+        log_metric(
+            "WHISPER_ONLY",
+            {
+                "endpoint": "/caption",
+                "phase": "end",
+                "status": "ok",
+                "audio_name": nombre_seguro,
+                "output_chars": len(texto),
+                "output_tokens_aprox": 0,
+                "whisper_ms": round((time.perf_counter() - whisper_start) * 1000, 2),
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "uses_llm_tokens": False,
+            },
+        )
         return JSONResponse({"ok": True, "texto": texto})
     except Exception as exc:
+        log_metric(
+            "WHISPER_ONLY",
+            {
+                "endpoint": "/caption",
+                "phase": "end",
+                "status": "error",
+                "audio_name": nombre_seguro,
+                "error": type(exc).__name__,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "uses_llm_tokens": False,
+            },
+        )
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(exc)},
@@ -254,23 +389,74 @@ def caption_audio(
 
 @app.post("/transcribir-chat")
 def transcribir_chat_audio(audio: UploadFile = File(...)) -> JSONResponse:
+    started_at = time.perf_counter()
     TEMP_DIR.mkdir(exist_ok=True)
     nombre_seguro = Path(audio.filename or "mensaje-voz.webm").name
     ruta_audio = TEMP_DIR / f"chat-{uuid4().hex}-{nombre_seguro}"
+    log_metric(
+        "WHISPER_ONLY",
+        {
+            "endpoint": "/transcribir-chat",
+            "phase": "start",
+            "audio_name": nombre_seguro,
+            "uses_llm_tokens": False,
+        },
+    )
 
     try:
         with ruta_audio.open("wb") as destino:
             shutil.copyfileobj(audio.file, destino)
 
+        whisper_start = time.perf_counter()
         texto = transcribir_voz_chat(str(ruta_audio))
         if not texto.strip():
+            log_metric(
+                "WHISPER_ONLY",
+                {
+                    "endpoint": "/transcribir-chat",
+                    "phase": "end",
+                    "status": "no_voice",
+                    "audio_name": nombre_seguro,
+                    "output_chars": 0,
+                    "output_tokens_aprox": 0,
+                    "whisper_ms": round((time.perf_counter() - whisper_start) * 1000, 2),
+                    "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                    "uses_llm_tokens": False,
+                },
+            )
             return JSONResponse(
                 status_code=422,
                 content={"ok": False, "error": "No se detecto voz clara en el audio."},
             )
 
+        log_metric(
+            "WHISPER_ONLY",
+            {
+                "endpoint": "/transcribir-chat",
+                "phase": "end",
+                "status": "ok",
+                "audio_name": nombre_seguro,
+                "output_chars": len(texto),
+                "output_tokens_aprox": 0,
+                "whisper_ms": round((time.perf_counter() - whisper_start) * 1000, 2),
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "uses_llm_tokens": False,
+            },
+        )
         return JSONResponse({"ok": True, "texto": texto})
     except Exception as exc:
+        log_metric(
+            "WHISPER_ONLY",
+            {
+                "endpoint": "/transcribir-chat",
+                "phase": "end",
+                "status": "error",
+                "audio_name": nombre_seguro,
+                "error": type(exc).__name__,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "uses_llm_tokens": False,
+            },
+        )
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(exc)},
@@ -284,12 +470,26 @@ def transcribir_chat_audio(audio: UploadFile = File(...)) -> JSONResponse:
 
 @app.get("/resumir")
 def resumir() -> StreamingResponse:
+    started_at = time.perf_counter()
+    log_metric("ENDPOINT", {"endpoint": "/resumir", "phase": "start"})
     contexto = _contexto_general(limit=5)
+    chunks_contexto = contexto.split("\n---\n") if contexto else []
     if not contexto:
         tokens = _stream_texto("No hay audio indexado.")
     else:
         tokens = generar_resumen_seguro(contexto)
 
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/resumir",
+            "phase": "response_started",
+            "context_chunks": len(chunks_contexto),
+            "context_chars": len(contexto),
+            "context_tokens_aprox": approx_tokens(contexto),
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
     return StreamingResponse(
         _stream_eventos(tokens),
         media_type="text/event-stream",
@@ -314,8 +514,27 @@ def mapa() -> StreamingResponse:
 
 @app.get("/preguntar")
 def preguntar(q: str = Query(..., min_length=1)) -> StreamingResponse:
+    started_at = time.perf_counter()
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/preguntar",
+            "phase": "start",
+            "question_chars": len(q),
+            "question_tokens_aprox": approx_tokens(q),
+        },
+    )
+    tokens = generar_respuesta(q)
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/preguntar",
+            "phase": "response_started",
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
     return StreamingResponse(
-        _stream_eventos(generar_respuesta(q)),
+        _stream_eventos(tokens),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -323,15 +542,37 @@ def preguntar(q: str = Query(..., min_length=1)) -> StreamingResponse:
 
 @app.post("/chat")
 def chat(payload: ChatRequest) -> StreamingResponse:
+    started_at = time.perf_counter()
     historial = [{"role": turno.role, "content": turno.content} for turno in payload.historial]
+    history_chars = sum(len(turno["content"]) for turno in historial)
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/chat",
+            "phase": "start",
+            "history_messages": len(historial),
+            "history_chars": history_chars,
+            "history_tokens_aprox": approx_tokens("".join(turno["content"] for turno in historial)),
+            "user_msg_chars": len(payload.mensaje),
+            "user_msg_tokens_aprox": approx_tokens(payload.mensaje),
+            "modo_lectura_facil": payload.modo_lectura_facil,
+        },
+    )
+    tokens = generar_chat(
+        payload.mensaje,
+        historial,
+        modo_lectura_facil=payload.modo_lectura_facil,
+    )
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/chat",
+            "phase": "response_started",
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
     return StreamingResponse(
-        _stream_eventos(
-            generar_chat(
-                payload.mensaje,
-                historial,
-                modo_lectura_facil=payload.modo_lectura_facil,
-            )
-        ),
+        _stream_eventos(tokens),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -339,7 +580,17 @@ def chat(payload: ChatRequest) -> StreamingResponse:
 
 @app.post("/calentar")
 def calentar() -> JSONResponse:
+    started_at = time.perf_counter()
+    log_metric("ENDPOINT", {"endpoint": "/calentar", "phase": "start"})
     calentar_modelo()
+    log_metric(
+        "ENDPOINT",
+        {
+            "endpoint": "/calentar",
+            "phase": "end",
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
     return JSONResponse({"ok": True, "modelo": LLM_MODEL})
 
 

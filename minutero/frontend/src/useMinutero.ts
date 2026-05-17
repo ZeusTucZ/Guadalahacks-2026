@@ -86,6 +86,38 @@ function formatBytes(bytes: number) {
   return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`
 }
 
+function approxTokens(text: string) {
+  return Math.floor((text || '').length / 4)
+}
+
+async function readJsonResponse(response: Response, fallbackMessage: string) {
+  const body = await response.text()
+  let data: Record<string, unknown> = {}
+
+  if (body.trim()) {
+    try {
+      data = JSON.parse(body) as Record<string, unknown>
+    } catch {
+      if (response.ok) throw new Error('El servidor respondió con JSON inválido.')
+    }
+  }
+
+  if (!response.ok) {
+    const serverError = typeof data.error === 'string' ? data.error : ''
+    throw new Error(serverError || `${fallbackMessage} (${response.status} ${response.statusText})`)
+  }
+
+  return data
+}
+
+function apiErrorMessage(action: string, error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  if (/502|bad gateway|failed to fetch|networkerror|econnrefused/i.test(message)) {
+    return `${action}: FastAPI no está respondiendo en 127.0.0.1:8000. Levanta el backend con "uvicorn main:app --reload --port 8000".`
+  }
+  return message || action
+}
+
 function getRecordingMimeType() {
   if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return ''
   const candidates = [
@@ -891,7 +923,7 @@ export function useMinutero() {
   const refreshStatus = useCallback(async () => {
     try {
       const res = await fetch('/estado')
-      const data = await res.json()
+      const data = await readJsonResponse(res, 'No se pudo consultar el estado local')
       setOllamaOk(Boolean(data.ollama))
       setModelOk(Boolean(data.modelo))
       setModelName(String(data.modelo_nombre || ''))
@@ -1138,8 +1170,7 @@ export function useMinutero() {
           body: form,
           signal: controller.signal,
         })
-        if (!response.ok) return
-        const data = await response.json()
+        const data = await readJsonResponse(response, 'No se pudieron generar subtítulos')
         if (captionRunIdRef.current !== runId) return
         const texto = String(data?.texto || '').trim()
         if (texto) {
@@ -1147,8 +1178,10 @@ export function useMinutero() {
           liveCaptionTextRef.current = merged
           setLiveCaption(merged)
         }
-      } catch {
-        // Aborted o error de red: ignoramos y reintentamos al siguiente tick.
+      } catch (error) {
+        if (controller.signal.aborted) return
+        setUploadMessage(apiErrorMessage('Subtítulos en vivo pausados', error))
+        stopLiveCaptionLoop()
       } finally {
         if (liveCaptionAbortRef.current === controller) {
           liveCaptionAbortRef.current = null
@@ -1404,18 +1437,24 @@ export function useMinutero() {
 
     try {
       const res = await fetch('/indexar', { method: 'POST', body: form })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.error || 'No se pudo indexar el audio.')
-      setPreview(data.preview || 'Audio procesado.')
-      captureImportantDates(data.preview || '')
-      setUploadMessage(`Listo. ${data.chunks} chunks indexados.`)
+      const data = await readJsonResponse(res, 'No se pudo indexar el audio')
+      const previewText = typeof data.preview === 'string' ? data.preview : 'Audio procesado.'
+      const indexedChunks = Number(data.chunks) || 0
+      if (!Boolean(data.ok)) {
+        throw new Error(
+          typeof data.error === 'string' ? data.error : 'No se pudo indexar el audio.',
+        )
+      }
+      setPreview(previewText)
+      captureImportantDates(previewText)
+      setUploadMessage(`Listo. ${indexedChunks} chunks indexados.`)
       setWorkEnabled(true)
       setSummaryOutput('')
       setMapMarkdown('')
       resetConversation()
       await refreshStatus()
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : 'Error al indexar.')
+      setUploadMessage(apiErrorMessage('No se pudo indexar el audio', error))
       setIndexBtnDisabled(false)
     } finally {
       setIsWorking(false)
@@ -1701,6 +1740,18 @@ export function useMinutero() {
         role: turn.role,
         content: turn.content.slice(0, 1200),
       }))
+      const historyChars = historyForRequest.reduce(
+        (total, turn) => total + turn.content.length,
+        0,
+      )
+      console.info(
+        '[TOKEN_BASELINE][CHAT_HISTORY]',
+        `frontend_messages=${historyForRequest.length}`,
+        `frontend_history_chars=${historyChars}`,
+        `frontend_history_tokens~=${approxTokens(historyForRequest.map((turn) => turn.content).join(''))}`,
+        `frontend_user_msg_chars=${cleanMessage.length}`,
+        `frontend_user_msg_tokens~=${approxTokens(cleanMessage)}`,
+      )
 
       setQuestion('')
       setIsChatting(true)
@@ -1879,9 +1930,13 @@ export function useMinutero() {
 
       try {
         const response = await fetch('/transcribir-chat', { method: 'POST', body: form })
-        const data = await response.json()
-        if (!response.ok || !data.ok) {
-          throw new Error(data.error || 'No se pudo transcribir el mensaje de voz.')
+        const data = await readJsonResponse(response, 'No se pudo transcribir el mensaje de voz')
+        if (!Boolean(data.ok)) {
+          throw new Error(
+            typeof data.error === 'string'
+              ? data.error
+              : 'No se pudo transcribir el mensaje de voz.',
+          )
         }
 
         const transcript = String(data.texto || '').trim()
@@ -1903,7 +1958,7 @@ export function useMinutero() {
         await streamChat(transcript, { speakResponse: autoSpeak })
       } catch (error) {
         beepError()
-        setVoiceStatus(error instanceof Error ? error.message : 'Error al procesar la voz.')
+        setVoiceStatus(apiErrorMessage('Error al procesar la voz', error))
       } finally {
         setIsTranscribingVoice(false)
       }

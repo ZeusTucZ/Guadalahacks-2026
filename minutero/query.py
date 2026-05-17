@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 try:
@@ -24,6 +26,35 @@ LLM_TOP_P = float(os.getenv("MINUTERO_TOP_P", "0.85"))
 TOP_K = 3
 MAX_CHAT_TURNS = 8
 MAX_CHAT_CHARS = 1200
+
+
+def approx_tokens(text: str) -> int:
+    return len(text or "") // 4
+
+
+def _metric_key(key: str) -> str:
+    return key.replace("_tokens_aprox", "_tokens~")
+
+
+def _metric_value(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_metric_value(item) for item in value) + "]"
+    text = str(value).replace("\n", "\\n")
+    if " " in text:
+        return repr(text)
+    return text
+
+
+def log_metric(event_name: str, data: dict[str, Any]) -> None:
+    payload = {"timestamp": datetime.now(timezone.utc).isoformat(), **data}
+    fields = " ".join(
+        f"{_metric_key(key)}={_metric_value(value)}" for key, value in payload.items()
+    )
+    print(f"[TOKEN_BASELINE][{event_name}] {fields}", flush=True)
 
 
 @dataclass
@@ -54,22 +85,64 @@ def _embedding(texto: str) -> list[float]:
     return embedding
 
 
-def recuperar_chunks(pregunta: str) -> list[str]:
+def recuperar_chunks(pregunta: str, task: str = "RAG") -> list[str]:
     cliente = _cliente_chroma()
     coleccion = cliente.get_or_create_collection(name=COLLECTION_NAME)
 
     total = coleccion.count()
     if total == 0:
+        log_metric(
+            "RAG",
+            {
+                "task": task,
+                "pregunta_chars": len(pregunta),
+                "pregunta_tokens_aprox": approx_tokens(pregunta),
+                "top_k": TOP_K,
+                "chunks": 0,
+                "rag_chars": 0,
+                "rag_tokens_aprox": 0,
+                "embedding_ms": 0,
+                "search_ms": 0,
+                "collection_chunks": 0,
+            },
+        )
         return []
 
+    embedding_start = time.perf_counter()
     pregunta_embedding = _embedding(pregunta)
+    embedding_ms = (time.perf_counter() - embedding_start) * 1000
+
+    search_start = time.perf_counter()
     resultado = coleccion.query(
         query_embeddings=[pregunta_embedding],
         n_results=min(TOP_K, total),
-        include=["documents"],
+        include=["documents", "distances"],
     )
+    search_ms = (time.perf_counter() - search_start) * 1000
+
     documentos = resultado.get("documents", [[]])
-    return documentos[0] if documentos else []
+    chunks = documentos[0] if documentos else []
+    rag_text = "\n---\n".join(chunks)
+    distances = resultado.get("distances", [[]])
+    distance_values = distances[0] if distances else []
+    log_metric(
+        "RAG",
+        {
+            "task": task,
+            "pregunta_chars": len(pregunta),
+            "pregunta_tokens_aprox": approx_tokens(pregunta),
+            "top_k": TOP_K,
+            "n_results": min(TOP_K, total),
+            "chunks": len(chunks),
+            "rag_chars": len(rag_text),
+            "rag_tokens_aprox": approx_tokens(rag_text),
+            "embedding_ms": round(embedding_ms, 2),
+            "search_ms": round(search_ms, 2),
+            "collection_chunks": total,
+            "distances": [round(float(value), 4) for value in distance_values],
+        },
+    )
+    return chunks
 
 
 def _normalizar_historial(historial: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -789,42 +862,158 @@ def _emitir_texto(texto: str) -> Iterator[str]:
     yield texto
 
 
-def stream_con_prompt(prompt: str) -> Iterator[str]:
+def stream_con_prompt(prompt: str, task: str = "LLM") -> Iterator[str]:
     import ollama
 
-    stream = ollama.chat(
-        model=LLM_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_GUARDRAILS},
-            {"role": "user", "content": prompt},
-        ],
-        stream=True,
-        keep_alive=LLM_KEEP_ALIVE,
-        options=_opciones_generacion(),
+    opciones = _opciones_generacion()
+    prompt_total = f"{SYSTEM_GUARDRAILS}\n{prompt}"
+    started_at = time.perf_counter()
+    first_token_at: float | None = None
+    output_parts: list[str] = []
+    logged_end = False
+
+    log_metric(
+        "LLM_START",
+        {
+            "task": task,
+            "model": LLM_MODEL,
+            "prompt_chars": len(prompt_total),
+            "prompt_tokens_aprox": approx_tokens(prompt_total),
+            "system_chars": len(SYSTEM_GUARDRAILS),
+            "user_prompt_chars": len(prompt),
+            "num_ctx": opciones["num_ctx"],
+            "num_predict": opciones["num_predict"],
+            "temperature": opciones["temperature"],
+            "top_p": opciones["top_p"],
+            "keep_alive": LLM_KEEP_ALIVE,
+        },
     )
 
-    for parte in stream:
-        mensaje = parte.get("message", {})
-        token = mensaje.get("content", "")
-        if token:
-            yield token
+    try:
+        stream = ollama.chat(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_GUARDRAILS},
+                {"role": "user", "content": prompt},
+            ],
+            stream=True,
+            keep_alive=LLM_KEEP_ALIVE,
+            options=opciones,
+        )
+
+        for parte in stream:
+            mensaje = parte.get("message", {})
+            token = mensaje.get("content", "")
+            if token:
+                if first_token_at is None:
+                    first_token_at = time.perf_counter()
+                output_parts.append(token)
+                yield token
+    except Exception as exc:
+        output = "".join(output_parts)
+        log_metric(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": round((first_token_at - started_at) * 1000, 2)
+                if first_token_at
+                else None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        logged_end = True
+        raise
+    finally:
+        if not logged_end:
+            output = "".join(output_parts)
+            log_metric(
+                "LLM_END",
+                {
+                    "task": task,
+                    "model": LLM_MODEL,
+                    "status": "ok",
+                    "output_chars": len(output),
+                    "output_tokens_aprox": approx_tokens(output),
+                    "ttft_ms": round((first_token_at - started_at) * 1000, 2)
+                    if first_token_at
+                    else None,
+                    "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                },
+            )
 
 
-def texto_con_prompt(prompt: str, num_predict: int | None = None) -> str:
+def texto_con_prompt(
+    prompt: str,
+    num_predict: int | None = None,
+    task: str = "LLM_TEXT",
+) -> str:
     import ollama
 
-    respuesta = ollama.chat(
-        model=LLM_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_GUARDRAILS},
-            {"role": "user", "content": prompt},
-        ],
-        stream=False,
-        keep_alive=LLM_KEEP_ALIVE,
-        options=_opciones_generacion(num_predict=num_predict),
+    opciones = _opciones_generacion(num_predict=num_predict)
+    prompt_total = f"{SYSTEM_GUARDRAILS}\n{prompt}"
+    started_at = time.perf_counter()
+    log_metric(
+        "LLM_START",
+        {
+            "task": task,
+            "model": LLM_MODEL,
+            "prompt_chars": len(prompt_total),
+            "prompt_tokens_aprox": approx_tokens(prompt_total),
+            "system_chars": len(SYSTEM_GUARDRAILS),
+            "user_prompt_chars": len(prompt),
+            "num_ctx": opciones["num_ctx"],
+            "num_predict": opciones["num_predict"],
+            "temperature": opciones["temperature"],
+            "top_p": opciones["top_p"],
+            "keep_alive": LLM_KEEP_ALIVE,
+        },
     )
-    mensaje = respuesta.get("message", {})
-    return str(mensaje.get("content", "")).strip()
+    try:
+        respuesta = ollama.chat(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_GUARDRAILS},
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+            keep_alive=LLM_KEEP_ALIVE,
+            options=opciones,
+        )
+        mensaje = respuesta.get("message", {})
+        output = str(mensaje.get("content", "")).strip()
+        log_metric(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "ok",
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        return output
+    except Exception as exc:
+        log_metric(
+            "LLM_END",
+            {
+                "task": task,
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": 0,
+                "output_tokens_aprox": 0,
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        raise
 
 
 def _hay_decisiones_explicitas(contexto: str) -> bool:
@@ -899,6 +1088,10 @@ def _limpiar_fragmento_contexto(fragmento: str) -> str:
     if nombre:
         return f"La persona se presenta como {nombre.group(1).strip()}"
 
+    soy = re.match(r"^soy\s+(.+)$", limpio, flags=re.IGNORECASE)
+    if soy:
+        return f"La persona se presenta como {soy.group(1).strip()}"
+
     edad = re.match(r"^tengo\s+(.+)$", limpio, flags=re.IGNORECASE)
     if edad:
         return f"Indica que tiene {edad.group(1).strip()}"
@@ -934,9 +1127,22 @@ def _puntos_clave_extractivos(contexto: str, limite: int = 5) -> list[str]:
     return puntos
 
 
+def _resumen_extractivo(contexto: str) -> str:
+    puntos = _puntos_clave_extractivos(contexto, limite=3)
+    if not puntos:
+        return "No hay suficiente informacion para generar un resumen."
+    return " ".join(puntos)
+
+
 def _limpiar_resumen(contexto: str, resumen: str) -> str:
     limpio = resumen.strip()
     puntos = _puntos_clave_extractivos(contexto)
+
+    limpio = _normalizar_seccion(
+        limpio,
+        "Resumen",
+        _resumen_extractivo(contexto),
+    )
 
     if puntos:
         limpio = _normalizar_seccion(
@@ -972,7 +1178,7 @@ def generar_resumen_seguro(contexto: str) -> Iterator[str]:
     cliente interpreta como "reemplaza lo anterior con esto".
     """
     buffer: list[str] = []
-    for token in stream_con_prompt(prompt_resumen(contexto)):
+    for token in stream_con_prompt(prompt_resumen(contexto), task="/resumir"):
         buffer.append(token)
         yield token
 
@@ -1038,27 +1244,74 @@ def calentar_modelo() -> None:
     try:
         import ollama
 
-        ollama.chat(
+        prompt = "Responde solo: ok"
+        opciones = _opciones_generacion(num_predict=2)
+        started_at = time.perf_counter()
+        log_metric(
+            "LLM_START",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "prompt_chars": len(prompt),
+                "prompt_tokens_aprox": approx_tokens(prompt),
+                "system_chars": 0,
+                "user_prompt_chars": len(prompt),
+                "num_ctx": opciones["num_ctx"],
+                "num_predict": opciones["num_predict"],
+                "temperature": opciones["temperature"],
+                "top_p": opciones["top_p"],
+                "keep_alive": LLM_KEEP_ALIVE,
+            },
+        )
+        respuesta = ollama.chat(
             model=LLM_MODEL,
-            messages=[{"role": "user", "content": "Responde solo: ok"}],
+            messages=[{"role": "user", "content": prompt}],
             stream=False,
             keep_alive=LLM_KEEP_ALIVE,
-            options=_opciones_generacion(num_predict=2),
+            options=opciones,
+        )
+        output = str(respuesta.get("message", {}).get("content", "")).strip()
+        log_metric(
+            "LLM_END",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "status": "ok",
+                "output_chars": len(output),
+                "output_tokens_aprox": approx_tokens(output),
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
         )
         print(f"Modelo {LLM_MODEL} caliente.")
     except Exception as exc:
+        log_metric(
+            "LLM_END",
+            {
+                "task": "/calentar",
+                "model": LLM_MODEL,
+                "status": "error",
+                "error": type(exc).__name__,
+                "output_chars": 0,
+                "output_tokens_aprox": 0,
+                "ttft_ms": None,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2)
+                if "started_at" in locals()
+                else 0,
+            },
+        )
         print(f"No se pudo calentar el modelo {LLM_MODEL}: {exc}")
 
 
 def generar_respuesta(pregunta: str) -> Iterator[str]:
-    chunks = recuperar_chunks(pregunta)
+    chunks = recuperar_chunks(pregunta, task="/preguntar")
     if not chunks:
         yield "No encontrado en la grabacion."
         return
 
     contexto = "\n---\n".join(chunks)
     prompt = prompt_pregunta(contexto, pregunta)
-    yield from stream_con_prompt(prompt)
+    yield from stream_con_prompt(prompt, task="/preguntar")
 
 
 EASY_READ_INSTRUCTIONS = (
@@ -1077,6 +1330,22 @@ def generar_chat(
     historial: list[dict[str, str]],
     modo_lectura_facil: bool = False,
 ) -> Iterator[str]:
+    historial_limpio = _normalizar_historial(historial)
+    historial_texto = "\n".join(turno["content"] for turno in historial_limpio)
+    log_metric(
+        "CHAT_HISTORY",
+        {
+            "task": "/chat",
+            "messages": len(historial_limpio),
+            "raw_messages": len(historial),
+            "history_chars": len(historial_texto),
+            "history_tokens_aprox": approx_tokens(historial_texto),
+            "user_msg_chars": len(mensaje),
+            "user_msg_tokens_aprox": approx_tokens(mensaje),
+            "modo_lectura_facil": modo_lectura_facil,
+        },
+    )
+
     respuesta_memoria = _respuesta_memoria_actual(mensaje, historial)
     if respuesta_memoria:
         yield respuesta_memoria
@@ -1103,7 +1372,7 @@ def generar_chat(
         return
 
     consulta = _consulta_para_retrieval(mensaje, historial)
-    chunks = recuperar_chunks(consulta or mensaje)
+    chunks = recuperar_chunks(consulta or mensaje, task="/chat")
     if not chunks:
         yield (
             "Fuente: No encontrado\n"
@@ -1154,7 +1423,7 @@ def generar_chat(
     # patron "Fuente: ... / Respuesta: ...", emitimos un REWRITE con la version
     # normalizada.
     buffer: list[str] = []
-    for token in stream_con_prompt(prompt):
+    for token in stream_con_prompt(prompt, task="/chat"):
         buffer.append(token)
         yield token
 

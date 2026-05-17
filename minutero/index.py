@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,33 @@ COLLECTION_NAME = "minutero"
 EMBEDDING_MODEL = "nomic-embed-text"
 _CLIENTE_CHROMA: Any | None = None
 _CLIENTE_CHROMA_LOCK = threading.Lock()
+
+
+def _approx_tokens(texto: str) -> int:
+    return len(texto or "") // 4
+
+
+def _metric_key(key: str) -> str:
+    return key.replace("_tokens_aprox", "_tokens~")
+
+
+def _metric_value(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    text = str(value).replace("\n", "\\n")
+    if " " in text:
+        return repr(text)
+    return text
+
+
+def _log_metric(event_name: str, data: dict[str, Any]) -> None:
+    payload = {"timestamp": datetime.now(timezone.utc).isoformat(), **data}
+    fields = " ".join(
+        f"{_metric_key(key)}={_metric_value(value)}" for key, value in payload.items()
+    )
+    print(f"[TOKEN_BASELINE][{event_name}] {fields}", flush=True)
 
 
 def _cliente_chroma():
@@ -78,7 +106,39 @@ def indexar(
     """
     coleccion = _coleccion()
 
+    started_at = time.perf_counter()
+    total_chars = sum(len(chunk) for chunk in chunks)
+    avg_chunk_chars = round(total_chars / len(chunks), 2) if chunks else 0
+    avg_chunk_tokens = round(
+        sum(_approx_tokens(chunk) for chunk in chunks) / len(chunks),
+        2,
+    ) if chunks else 0
+    _log_metric(
+        "INDEX",
+        {
+            "phase": "embedding_start",
+            "audio_name": audio_name or "grabacion",
+            "chunks": len(chunks),
+            "avg_chunk_chars": avg_chunk_chars,
+            "avg_chunk_tokens_aprox": avg_chunk_tokens,
+            "embedding_model": EMBEDDING_MODEL,
+        },
+    )
+
     if not chunks:
+        _log_metric(
+            "INDEX",
+            {
+                "phase": "embedding_end",
+                "audio_name": audio_name or "grabacion",
+                "chunks": 0,
+                "avg_chunk_chars": 0,
+                "avg_chunk_tokens_aprox": 0,
+                "embedding_model": EMBEDDING_MODEL,
+                "embeddings_ms": 0,
+                "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
         print("Indexacion completa.")
         return 0
 
@@ -88,11 +148,15 @@ def indexar(
     nombre = audio_name or "grabacion"
 
     total = len(chunks)
+    embeddings_ms = 0.0
     for i, chunk in enumerate(chunks):
         print(f"Indexando chunk {i + 1}/{total} de {nombre}...")
+        embedding_start = time.perf_counter()
+        embedding = _embedding(chunk)
+        embeddings_ms += (time.perf_counter() - embedding_start) * 1000
         coleccion.add(
             ids=[f"{audio_id}_{i}"],
-            embeddings=[_embedding(chunk)],
+            embeddings=[embedding],
             documents=[chunk],
             metadatas=[
                 {
@@ -104,6 +168,20 @@ def indexar(
             ],
         )
 
+    _log_metric(
+        "INDEX",
+        {
+            "phase": "embedding_end",
+            "audio_name": nombre,
+            "audio_id": audio_id,
+            "chunks": total,
+            "avg_chunk_chars": avg_chunk_chars,
+            "avg_chunk_tokens_aprox": avg_chunk_tokens,
+            "embedding_model": EMBEDDING_MODEL,
+            "embeddings_ms": round(embeddings_ms, 2),
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
     print("Indexacion completa.")
     return total
 
@@ -141,6 +219,24 @@ def obtener_chunks(
     pares.sort(key=lambda item: (item[0], -item[1]), reverse=True)
     documentos_ordenados = [documento for _, _, documento in pares]
     return documentos_ordenados[:limit] if limit else documentos_ordenados
+
+
+def obtener_chunks_ultima_grabacion(limit: int | None = None) -> list[str]:
+    """Devuelve chunks solo de la grabacion mas reciente.
+
+    Resumen y mapa mental deben describir el audio que se acaba de procesar,
+    no mezclarlo con memoria historica de otras grabaciones.
+    """
+    grabaciones = [
+        grabacion
+        for grabacion in listar_grabaciones()
+        if grabacion.get("audio_id") and grabacion.get("audio_id") != "__legacy__"
+    ]
+    if not grabaciones:
+        return obtener_chunks(limit=limit)
+
+    audio_id = str(grabaciones[0]["audio_id"])
+    return obtener_chunks(limit=limit, audio_id=audio_id)
 
 
 def listar_grabaciones() -> list[dict[str, Any]]:
