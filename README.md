@@ -1,90 +1,120 @@
 # Lux
 
-Lux es un asistente local para convertir voz en memoria accesible: subtitulos en vivo, transcripcion, resumen ejecutivo, mapa mental y chat conversacional con RAG.
+Lux is a local AI assistant that turns speech into accessible memory: live
+subtitles, transcription, an executive summary, a mind map, and conversational
+RAG chat. It was built for the Guadalahacks 2026 hackathon.
 
-El objetivo del proyecto es demostrar IA en el borde: el audio, los embeddings, la base vectorial y el LLM corren en la misma maquina del usuario, sin APIs externas de IA.
+The goal is to demonstrate AI at the edge: audio, embeddings, the vector
+database and the LLM all run on the user's own machine — no external AI APIs.
 
-## Problema
+## Problem
 
-En reuniones, clases y conferencias se pierde informacion importante porque todo ocurre de forma oral. Tomar notas en tiempo real es dificil, especialmente para personas con hipoacusia, TDAH, dislexia, fatiga cognitiva o barreras de comprension. Muchas herramientas existentes dependen de la nube, tienen costo recurrente o implican enviar audio sensible a terceros.
+In meetings, classes and talks, important information is lost because
+everything happens out loud. Taking notes in real time is hard, especially for
+people with hearing loss, ADHD, dyslexia, cognitive fatigue or comprehension
+barriers. Many existing tools depend on the cloud, have a recurring cost, or
+send sensitive audio to third parties.
 
-## Solucion
+## Solution
 
-Lux transforma una grabacion en una memoria local. La entrada puede ser un archivo de audio o una grabacion capturada desde el microfono del navegador:
+Lux turns a recording into local memory. The input can be an audio file or a
+recording captured from the browser microphone:
 
 ```text
 Audio
--> Whisper local
--> Transcripcion limpia
--> Chunks con overlap
--> Embeddings locales con Ollama
--> ChromaDB local
--> RAG con LLM local
--> Resumen / mapa mental / chat
+-> local Whisper
+-> clean transcription
+-> chunks with overlap
+-> local embeddings with Ollama
+-> local ChromaDB
+-> RAG with a local LLM
+-> summary / mind map / chat
 ```
 
-La optimizacion de tokens ocurre con embeddings: el modelo no recibe toda la transcripcion en cada pregunta, solo los fragmentos semanticamente relevantes. El chat conserva historial reciente en el navegador y lo combina con retrieval local para mantener el hilo de la conversacion sin reenviar toda la reunion.
+Token usage is optimized with embeddings: the model does not receive the whole
+transcription on every question, only the semantically relevant fragments.
+The chat keeps recent history in the browser and combines it with local
+retrieval, so it stays on topic without resending the whole meeting.
 
-## Conversacion por voz
+> **Portfolio/CV claim:** RAG reduces input tokens by about 30% compared with
+> sending the full transcript. This figure comes from the author's CV and
+> portfolio — it is **not** measured in this repository.
 
-El chat tambien puede usarse hablando. El navegador captura un mensaje corto desde el microfono, detecta silencio para detener la grabacion, envia el clip al backend y Whisper local lo transcribe. Esa transcripcion entra al mismo endpoint `/chat`, por lo que conserva historial y RAG. La respuesta se muestra como texto y, si el navegador tiene sintesis de voz disponible, se lee en voz alta con una voz en espanol.
+## Voice conversation
 
-Este flujo evita reconocimiento de voz en la nube: la transcripcion del usuario se hace con Whisper local. La salida hablada usa las voces del sistema/navegador disponibles en la maquina.
+The chat can also be used by speaking. The browser captures a short message
+from the microphone, detects silence to stop recording, sends the clip to the
+backend, and local Whisper transcribes it. That transcription goes into the
+same `/chat` endpoint, so it keeps history and RAG. The answer is shown as
+text and, if the browser has speech synthesis available, read aloud with a
+Spanish voice.
 
-### Accesibilidad
+This flow avoids cloud speech recognition: transcribing the user is done with
+local Whisper. Spoken output uses the voices available on the machine/browser.
 
-La conversacion por voz esta pensada para personas con baja vision o ceguera:
+### Accessibility
 
-- Atajo de teclado **barra espaciadora** para iniciar y detener la grabacion sin tocar el raton.
-- **Beeps audibles** distintos al iniciar, detener y en errores: 880 Hz arranque, 440 Hz cierre, 220 Hz error.
-- **Modo conversacion continua**: tras leer la respuesta en voz alta, el microfono se reabre solo para el siguiente turno.
-- **Calibracion automatica del piso de ruido**: el umbral de voz se adapta al microfono y al ambiente en los primeros 350 ms de cada turno.
-- **Vista previa de la transcripcion**: lo que entendio Whisper se muestra en pantalla y se lee con TTS antes de generar la respuesta.
-- `aria-live="polite"` en el estado del controlador de voz para que lectores de pantalla anuncien cambios.
+Voice conversation is designed for people with low vision or blindness:
 
-### Calidad de la transcripcion por voz
+- **Spacebar** shortcut to start and stop recording without touching the mouse.
+- **Audible beeps** that differ on start, stop and error: 880 Hz start,
+  440 Hz stop, 220 Hz error.
+- **Continuous conversation mode**: after reading the answer aloud, the
+  microphone reopens by itself for the next turn.
+- **Automatic noise-floor calibration**: the voice threshold adapts to the
+  microphone and environment during the first 350 ms of each turn.
+- **Transcription preview**: what Whisper understood is shown on screen and
+  read with TTS before the answer is generated.
+- `aria-live="polite"` on the voice controller status so screen readers
+  announce changes.
 
-El endpoint `/transcribir-chat` usa por defecto el modelo `small` de Whisper (mejor que `base` para nombres propios y terminos en ingles como "Patrick Mahomes", "quarterback", "React"). Tambien usa un `initial_prompt` bilingue para sesgar la deteccion. Puedes cambiarlo con la variable:
+### Transcription quality for voice chat
+
+The `/transcribir-chat` endpoint uses Whisper `small` by default (better than
+`base` for proper names and English terms such as "Patrick Mahomes",
+"quarterback", "React"). It also uses a bilingual `initial_prompt` to bias
+detection. Change it with:
 
 ```bash
 MINUTERO_VOICE_WHISPER_MODEL=medium uvicorn main:app --reload --port 8000
 ```
 
-Opciones de calidad/velocidad: `tiny` < `base` < `small` (por defecto) < `medium` < `large`. En Mac Apple Silicon, `small` corre rapido y mejora dramaticamente la precision con nombres propios y terminos tecnicos. Si tu maquina es lenta, baja a `base`.
+Quality/speed options: `tiny` < `base` < `small` (default) < `medium` <
+`large`. On Mac Apple Silicon, `small` runs fast and greatly improves accuracy
+on proper names and technical terms. If your machine is slow, drop to `base`.
 
-Para subtitulos en vivo, Lux usa por defecto `MINUTERO_CAPTION_WHISPER_MODEL=base`.
-`tiny` es mas rapido, pero confunde nombres y terminos tecnicos con mucha
-facilidad. Puedes reforzar el vocabulario esperado de una demo con:
+For live subtitles, Lux uses `MINUTERO_CAPTION_WHISPER_MODEL=base` by
+default. `tiny` is faster but confuses names and technical terms easily. You
+can reinforce the expected vocabulary of a demo with:
 
 ```bash
 MINUTERO_CAPTION_CONTEXT="Lorenzo Orrante, hackaton, LLM local" uvicorn main:app --reload --port 8000
 ```
 
-Los subtitulos no aparecen palabra por palabra. Se actualizan por bloques de
-5 segundos para darle a Whisper suficiente audio.
+Subtitles do not appear word by word. They update in 5-second blocks so
+Whisper gets enough audio.
 
-Mejora de precision implementada: cada bloque de subtitulos envia al backend
-una ventana corta del texto ya transcrito. Whisper usa ese contexto en el
-`initial_prompt` para mantener continuidad entre bloques, nombres propios y
-terminos tecnicos. Ademas, el backend aplica correcciones locales de vocabulario
-para errores frecuentes de la demo, como "LLM local", "Tecnologico de
-Monterrey", "personas ciegas", "transcriben" y frases de accesibilidad. Todo
-sigue corriendo localmente.
+Accuracy improvement implemented: each subtitle block sends the backend a
+short window of the text already transcribed. Whisper uses that context in the
+`initial_prompt` to keep continuity between blocks, proper names and technical
+terms. The backend also applies local vocabulary corrections for frequent demo
+mistakes such as "LLM local", "Tecnologico de Monterrey", "personas ciegas",
+"transcriben" and accessibility phrases. Everything still runs locally.
 
-## Requisitos del sistema
+## System requirements
 
 1. Python 3.10+
-2. ffmpeg instalado para Whisper
-3. Ollama instalado y corriendo en `localhost:11434`
-4. Navegador con permisos de microfono para la conversacion por voz
+2. `ffmpeg` installed (for Whisper)
+3. Ollama installed and running on `localhost:11434`
+4. A browser with microphone permissions (for voice conversation)
 
-En macOS con Homebrew:
+On macOS with Homebrew:
 
 ```bash
 brew install ffmpeg
 ```
 
-## Instalacion
+## Installation
 
 ```bash
 cd minutero
@@ -93,28 +123,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Modelos de Ollama
+## Ollama models
 
-Instala Ollama desde:
-
-```text
-https://ollama.com
-```
-
-Descarga los modelos:
+Install Ollama from `https://ollama.com`, then download the models:
 
 ```bash
 ollama pull gemma4:e4b
 ollama pull nomic-embed-text
 ```
 
-Crea el modelo personalizado `minutero` con el archivo `Modelfile` incluido:
+Create the custom `minutero` model with the included `Modelfile`:
 
 ```bash
 ollama create minutero -f Modelfile
 ```
 
-Contenido del `Modelfile`:
+The `Modelfile`:
 
 ```text
 FROM gemma4:e4b
@@ -131,7 +155,7 @@ Si algo no esta en el contexto, responde exactamente:
 """
 ```
 
-## Arranque
+## Running
 
 ```bash
 cd minutero
@@ -139,59 +163,63 @@ source .venv/bin/activate
 uvicorn main:app --reload --port 8000
 ```
 
-Si trabajas con el frontend de Vite en desarrollo, deja FastAPI corriendo en
-`127.0.0.1:8000` y en otra terminal arranca Vite:
+If you work with the Vite frontend in development, leave FastAPI running on
+`127.0.0.1:8000` and start Vite in another terminal:
 
 ```bash
 cd minutero/frontend
 npm run dev -- --host 127.0.0.1
 ```
 
-Abre `http://127.0.0.1:5173/static/`. Si FastAPI no esta corriendo, Vite mostrara
-errores como `ECONNREFUSED 127.0.0.1:8000` al llamar `/indexar`, `/chat`,
-`/caption` o `/grabaciones`.
+Open `http://127.0.0.1:5173/static/`. If FastAPI is not running, Vite shows
+errors such as `ECONNREFUSED 127.0.0.1:8000` when calling `/indexar`, `/chat`,
+`/caption` or `/grabaciones`.
 
-Para demo rapida en equipos con menos memoria, puedes usar un modelo local mas ligero que ya tengas en Ollama:
+For a quick demo on machines with less memory, you can use a lighter local
+model you already have in Ollama:
 
 ```bash
 MINUTERO_LLM_MODEL=llama3.2:3b MINUTERO_NUM_CTX=2048 MINUTERO_NUM_PREDICT=350 uvicorn main:app --reload --port 8000
 ```
 
-El modelo por defecto sigue siendo `minutero`. La variable `MINUTERO_KEEP_ALIVE` mantiene el modelo cargado en Ollama despues de la primera generacion:
+The default model is still `minutero`. The `MINUTERO_KEEP_ALIVE` variable
+keeps the model loaded in Ollama after the first generation:
 
 ```bash
 MINUTERO_KEEP_ALIVE=30m uvicorn main:app --reload --port 8000
 ```
 
-Abre:
+Open:
 
 ```text
 http://localhost:8000
 ```
 
-## Prueba del pipeline en terminal
+## Testing the pipeline from the terminal
 
-Antes de usar la interfaz, puedes validar el pipeline base:
+Before using the interface, you can validate the base pipeline:
 
 ```bash
 cd minutero
 source .venv/bin/activate
-python run_pipeline.py /ruta/a/audio.mp3
+python run_pipeline.py /path/to/audio.mp3
 ```
 
-Esto crea `outputs/transcripcion.txt` e indexa los chunks en `chroma_db/`.
+This creates `outputs/transcripcion.txt` and indexes the chunks in
+`chroma_db/`.
 
-## Demo sugerida
+## Suggested demo
 
-1. Inicia Ollama.
-2. Corre el servidor local.
-3. Sube el audio de la platica o graba una muestra desde el microfono.
-4. Genera el resumen.
-5. Genera el mapa mental.
-6. Pregunta: `¿Cuales son las reglas del track?`
-7. Pregunta algo no mencionado para validar que responde: `No encontrado en la grabacion.`
+1. Start Ollama.
+2. Run the local server.
+3. Upload the talk audio or record a sample from the microphone.
+4. Generate the summary.
+5. Generate the mind map.
+6. Ask: `¿Cuales son las reglas del track?`
+7. Ask something not mentioned to check it answers:
+   `No encontrado en la grabacion.`
 
-## Estructura
+## Structure
 
 ```text
 minutero/
@@ -204,13 +232,61 @@ minutero/
 ├── run_pipeline.py
 ├── requirements.txt
 ├── Modelfile
+├── frontend/        # Vite + React + TypeScript app
 └── static/
     └── index.html
 ```
 
-## Notas de producto
+## Stack
 
-- Whisper se usa localmente, no Whisper API.
-- Ollama se usa localmente, no APIs externas de IA.
-- ChromaDB corre en modo persistente local, sin servidor.
-- La interfaz no usa frameworks ni CDN para mantener la demo funcional sin internet.
+- Backend: Python 3.10+, FastAPI / Uvicorn, `openai-whisper`, `ollama`,
+  `chromadb` (local persistent mode, no server), `python-multipart`
+- LLM: custom Ollama model `minutero` (from `gemma4:e4b`); embeddings with
+  `nomic-embed-text`
+- Frontend: Vite + React 19 + TypeScript + Tailwind CSS
+- `ffmpeg` for audio handling
+
+## Product notes
+
+- Whisper runs locally, not the Whisper API.
+- Ollama runs locally — no external AI APIs.
+- ChromaDB runs in local persistent mode, without a server.
+- The interface uses no frameworks or CDNs, so the demo works without
+  internet.
+
+## Current state and limitations
+
+- No live demo URL and no screenshots in this repository.
+- No quantified results measured in this repository (see the token-reduction
+  claim above, which comes from the author's CV/portfolio).
+- No hackathon placement stated.
+
+---
+
+## Resumen en español
+
+**Lux** es un asistente local que convierte voz en memoria accesible:
+subtítulos en vivo, transcripción, resumen ejecutivo, mapa mental y chat
+conversacional con RAG. Fue construido para el hackatón Guadalahacks 2026.
+
+Todo corre en la máquina del usuario — audio, embeddings, base vectorial y
+LLM — sin APIs externas de IA, lo que protege la privacidad del audio y
+evita costos recurrentes. El flujo es: audio → Whisper local → transcripción
+→ fragmentos con solapamiento → embeddings locales con Ollama → ChromaDB
+local → RAG con un LLM local (`minutero`, un modelo personalizado basado en
+`gemma`, con embeddings `nomic-embed-text`).
+
+El chat también funciona por voz, con funciones de accesibilidad: atajo de
+barra espaciadora, beeps audibles, modo de conversación continua, calibración
+automática del piso de ruido y `aria-live` para lectores de pantalla.
+
+Para ejecutarlo: instala Ollama y `ffmpeg`, descarga los modelos
+(`gemma4:e4b`, `nomic-embed-text`), crea el modelo `minutero` con el
+`Modelfile` incluido, instala las dependencias con
+`pip install -r requirements.txt` y arranca el backend con
+`uvicorn main:app --reload --port 8000`. El frontend de Vite está en
+`minutero/frontend`. Abre `http://localhost:8000`.
+
+> **Aclaración:** la reducción de ~30% en tokens de entrada atribuida a RAG
+> es una afirmación del CV/portafolio del autor, no una medición realizada
+> en este repositorio. No hay demo en vivo ni capturas de pantalla.
